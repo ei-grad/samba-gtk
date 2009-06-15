@@ -136,25 +136,41 @@ class LdbBrowser(gtk.Window):
         self.menu_disconnect.set_sensitive(False)
         self.ldb = None
         
+    def _add_node(self, dn, parent=""):
+        if dn.is_special() and self.hide_special:
+            return None
+        _dn = str(dn)
+        text = _dn[:len(_dn)-len(parent)].rstrip(",")
+        self.treenodes[_dn] = self.treemodel.append(
+            self.treenodes[parent], [text, dn])
+        for i in self.ldb.search(dn, ldb.SCOPE_ONELEVEL, None, ['dn']):
+            self._add_node(i.dn, _dn)
+            
     def _fill_tree(self):
+        def _first_level(msg):
+            """Return list of DN without parent."""
+            lev = sys.maxint
+            ret = []
+            spec = []
+            for i in msg:
+                dn = i.dn
+                l = str(dn).count(',')
+                if dn.is_special():
+                    spec.append(dn)
+                elif l < lev:
+                    ret = [dn]
+                    lev = l
+                elif l == lev:
+                    ret.append(dn)
+            return ret + spec
         
-        def add_node(dn,  parent):
-            if dn.is_special() and self.hide_special:
-                return None
-            _dn = str(dn)
-            text = _dn[:len(_dn)-len(parent)].rstrip(",")
-            self.treenodes[_dn] = self.treemodel.append(
-                self.treenodes[parent], [text, dn])
-            for i in self.ldb.search(dn, ldb.SCOPE_ONELEVEL, None, ['dn']):
-                add_node(i.dn, _dn)
-                
         self.treemodel.clear()
         self.treenodes = {}
         self.treenodes[""] = None
         
-        root = self.ldb.get_root_basedn()
-        if root:
-            add_node(root, "")
+        for dn in _first_level(self.ldb.search(None, ldb.SCOPE_SUBTREE,
+                                                   None, ['dn'])):
+            self._add_node(dn)
             
     def _toggle_special_entries(self, item):
         self.hide_special = item.get_active()
@@ -177,11 +193,19 @@ class LdbBrowser(gtk.Window):
             pass
         
     def add_object(self, action):
+        """Adds object to ldb, and appends it to tree."""
         dialog = AddObjectDialog()
         if dialog.run() == gtk.RESPONSE_OK:
             try:
-                self.ldb.add(ldb.Message(ldb.Dn(self.ldb, dialog.get_dn())))
-                self._fill_tree()
+                dn = ldb.Dn(self.ldb, dialog.get_dn())
+                msg = ldb.Message(dn)
+                self.ldb.add(msg)
+                parent_dn = dn.parent()
+                if parent_dn.is_valid() and \
+                    str(parent_dn) in self.treenodes.keys():
+                        self._add_node(dn, str(parent_dn))
+                else:
+                    self._add_node(dn)
             except ldb.LdbError as err:
                 dialog2 = gtk.MessageDialog(self,
                     gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
