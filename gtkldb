@@ -111,7 +111,7 @@ class LdbBrowser(gtk.Window):
         if dialog.run() == gtk.RESPONSE_OK:
             try:
                 self.set_ldb(Ldb(dialog.get_url()))
-            except ldb.LdbError as err:
+            except ldb.LdbError, err:
                 dialog2 = gtk.MessageDialog(self,
                     gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
                     gtk.BUTTONS_CLOSE, str(err))
@@ -181,23 +181,23 @@ class LdbBrowser(gtk.Window):
         (model, iter) = item.get_selection().get_selected()
         dn = model.get_value(iter, 1)
         self.attributemodel.clear()
-        try:
-            msg = self.ldb.search(dn, ldb.SCOPE_BASE)
-            if len(msg) != 0:
-                for name, el in msg[0].items():
-                    if name == "dn":
-                        continue
-                    for val in set(el):
-                        self.attributemodel.append([name, val, el])
-        except ldb.LdbError:
-            pass
+        msg = self.ldb.search(dn, ldb.SCOPE_BASE)
+        if len(msg) > 0:
+            for name, el in msg[0].items():
+                if name == "dn":
+                    continue
+                for val in set(el):
+                    self.attributemodel.append([name, val, el])
+
         
     def add_object(self, action):
         """Adds object to ldb, and appends it to tree."""
         dialog = AddObjectDialog()
         if dialog.run() == gtk.RESPONSE_OK:
             try:
-                dn = ldb.Dn(self.ldb, dialog.get_dn())
+                _dn = dialog.get_dn()
+                dialog.destroy()
+                dn = ldb.Dn(self.ldb, _dn)
                 msg = ldb.Message(dn)
                 self.ldb.add(msg)
                 parent_dn = dn.parent()
@@ -206,15 +206,15 @@ class LdbBrowser(gtk.Window):
                         self._add_node(dn, str(parent_dn))
                 else:
                     self._add_node(dn)
-            except ldb.LdbError as err:
+            except (ldb.LdbError, ValueError), err:
                 dialog2 = gtk.MessageDialog(self,
                     gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
                     gtk.BUTTONS_CLOSE, str(err))
                 # Close dialog on user response
                 dialog2.connect ("response", lambda d, r: d.destroy())
                 dialog2.show()
-        dialog.destroy()
-    
+
+
     def __init__(self):
         super(LdbBrowser, self).__init__()
         vbox = gtk.VBox(spacing=0)
