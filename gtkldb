@@ -21,25 +21,27 @@
 
 """Simple GTK+ frontend for LDB."""
 
+import os
+import sys
 import gtk
 import gobject
 import ldb
-import os
-import sys
+
 
 class LdbURLDialog(gtk.Dialog):
     """Dialog that prompts for a LDB URL.
-
-Ideally this should remember LDB urls and list them in a combo box.
-"""
+    
+    Ideally this should remember LDB urls and list them in a combo box.
+    """
+    
     def __init__(self, parent=None):
         """Create a new LdbURLDialog.
-
-:param parent: Parent window.
-"""
+        
+        parent -- Parent window.
+        """
         super(LdbURLDialog, self).__init__(parent=parent,
-                buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OPEN,
-                    gtk.RESPONSE_OK))
+                buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
+                         gtk.STOCK_OPEN, gtk.RESPONSE_OK))
         self.vbox.add(gtk.Label("Enter URL:"))
         self.url = gtk.Entry()
         self.vbox.add(self.url)
@@ -51,8 +53,9 @@ Ideally this should remember LDB urls and list them in a combo box.
 
 def Ldb(url):
     """Create a new LDB object.
-:param url: LDB URL to connect to.
-"""
+    
+    url -- LDB URL to connect to.
+    """
     ret = ldb.Ldb()
     path = os.getenv("LDB_MODULES_PATH")
     if path is not None:
@@ -62,18 +65,17 @@ def Ldb(url):
 
 
 class LdbBrowser(gtk.Window):
-    """GTK+ based LDB browser.
-"""
+    """GTK+ based LDB browser."""
     
     ldb = None
     hide_special = False
     
     def set_ldb(self, ldb):
         """Change the LDB object displayed.
-
-Will refresh the window.
-:param ldb: New LDB object to use.
-"""
+        
+        Will refresh the window.
+        ldb -- New LDB object to use.
+        """
         self.ldb = ldb
         self.menu_disconnect.set_sensitive(True)
         self._fill_tree()
@@ -107,9 +109,8 @@ Will refresh the window.
                 return None
             _dn = str(dn)
             text = _dn[:len(_dn)-len(parent)].rstrip(",")
-            parent_in_model = self.treenodes[parent]
             self.treenodes[_dn] = self.treemodel.append(
-                parent_in_model, [text, dn])
+                self.treenodes[parent], [text, dn])
             for i in self.ldb.search(dn, ldb.SCOPE_ONELEVEL, None, ['dn']):
                 add_node(i.dn, _dn)
                 
@@ -117,8 +118,10 @@ Will refresh the window.
         self.treenodes = {}
         self.treenodes[""] = None
         
-        add_node(self.ldb.get_root_basedn(),  "")
-        
+        root = self.ldb.get_root_basedn()
+        if root:
+            add_node(root, "")
+            
     def _toggle_special_entries(self, item):
         self.hide_special = item.get_active()
         if self.ldb != None:
@@ -213,11 +216,12 @@ Will refresh the window.
         self.set_default_size(700, 500)
         self.set_title("gtkldb")
         self.show_all()
-        
+
+
 def main():
     browser = LdbBrowser()
-#    if len(sys.argv) > 1:
-#        browser.set_ldb(Ldb(sys.argv[1]))
+    if len(sys.argv) > 1:
+        browser.set_ldb(Ldb(sys.argv[1]))
     gtk.main()
     
 if __name__ == "__main__":
