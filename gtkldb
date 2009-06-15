@@ -42,13 +42,39 @@ class LdbURLDialog(gtk.Dialog):
         super(LdbURLDialog, self).__init__(parent=parent,
                 buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
                          gtk.STOCK_OPEN, gtk.RESPONSE_OK))
-        self.vbox.add(gtk.Label("Enter URL:"))
+        hbox = gtk.HBox()
+        hbox.set_border_width(5)
+        hbox.set_spacing(5)
+        hbox.pack_start(gtk.Label("Enter URL:"), expand=False)
         self.url = gtk.Entry()
-        self.vbox.add(self.url)
+        hbox.pack_end(self.url)
+        self.vbox.add(hbox)
         self.show_all()
         
     def get_url(self):
         return self.url.get_text()
+
+
+class AddObjectDialog(gtk.Dialog):
+    """Dialog that prompts for an object name, classes and properties."""
+    
+    def __init__(self, parent=None):
+        super(AddObjectDialog, self).__init__(parent=parent,
+            buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
+                     gtk.STOCK_ADD, gtk.RESPONSE_OK))
+        
+        hbox = gtk.HBox()
+        hbox.set_border_width(5)
+        hbox.set_spacing(5)
+        hbox.pack_start(gtk.Label("DN:"), expand=False)
+        self.dn_entry = gtk.Entry()
+        hbox.pack_end(self.dn_entry)
+        self.vbox.add(hbox)
+        self.show_all()
+        
+    def get_dn(self):
+        """Returns DN string"""
+        return self.dn_entry.get_text()
 
 
 def Ldb(url):
@@ -83,7 +109,15 @@ class LdbBrowser(gtk.Window):
     def _cb_connect(self, button):
         dialog = LdbURLDialog()
         if dialog.run() == gtk.RESPONSE_OK:
-            self.set_ldb(Ldb(dialog.get_url()))
+            try:
+                self.set_ldb(Ldb(dialog.get_url()))
+            except ldb.LdbError as err:
+                dialog2 = gtk.MessageDialog(self,
+                    gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
+                    gtk.BUTTONS_CLOSE, str(err))
+                # Close dialog on user response
+                dialog2.connect ("response", lambda d, r: d.destroy())
+                dialog2.show()
         dialog.destroy()
         
     def _cb_open(self, button):
@@ -141,42 +175,69 @@ class LdbBrowser(gtk.Window):
                         self.attributemodel.append([name, val, el])
         except ldb.LdbError:
             pass
-            
+        
+    def add_object(self, action):
+        dialog = AddObjectDialog()
+        if dialog.run() == gtk.RESPONSE_OK:
+            try:
+                self.ldb.add(ldb.Message(ldb.Dn(self.ldb, dialog.get_dn())))
+                self._fill_tree()
+            except ldb.LdbError as err:
+                dialog2 = gtk.MessageDialog(self,
+                    gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
+                    gtk.BUTTONS_CLOSE, str(err))
+                # Close dialog on user response
+                dialog2.connect ("response", lambda d, r: d.destroy())
+                dialog2.show()
+        dialog.destroy()
+    
     def __init__(self):
         super(LdbBrowser, self).__init__()
         vbox = gtk.VBox(spacing=0)
         
         # Menu
         self.menu = gtk.MenuBar()
+        
+        # Database menu
         menuitem_db = gtk.MenuItem("_Database")
         menu_db = gtk.Menu()
         menuitem_db.set_submenu(menu_db)
         self.menu.add(menuitem_db)
         
-        # Database menu
-        menu_connect = gtk.MenuItem("Connect to _URL...")
+        menu_connect = gtk.ImageMenuItem(gtk.STOCK_CONNECT)
         menu_connect.connect('activate', self._cb_connect)
         menu_db.add(menu_connect)
         
-        menu_open = gtk.MenuItem("Open _File...")
+        menu_open = gtk.ImageMenuItem(gtk.STOCK_OPEN)
         menu_open.connect('activate', self._cb_open)
         menu_db.add(menu_open)
         
-        self.menu_disconnect = gtk.MenuItem("_Disconnect")
+        self.menu_disconnect = gtk.ImageMenuItem(gtk.STOCK_DISCONNECT)
         self.menu_disconnect.connect('activate', self._cb_disconnect)
         self.menu_disconnect.set_sensitive(False)
         menu_db.add(self.menu_disconnect)
         
         menu_db.add(gtk.SeparatorMenuItem())
+        
         menu_hide_special = gtk.CheckMenuItem("_Hide special entries")
         menu_hide_special.connect('toggled', self._toggle_special_entries)
         menu_db.add(menu_hide_special)
         
         menu_db.add(gtk.SeparatorMenuItem())
+        
         menu_exit = gtk.ImageMenuItem(gtk.STOCK_QUIT)
         menu_exit.connect('activate', lambda x: gtk.main_quit())
-        
         menu_db.add(menu_exit)
+        
+        # Record menu
+        menuitem_edit = gtk.MenuItem("_Record")
+        menu_edit = gtk.Menu()
+        menuitem_edit.set_submenu(menu_edit)
+        self.menu.add(menuitem_edit)
+        
+        menu_add_message = gtk.ImageMenuItem(gtk.STOCK_ADD)
+        menu_add_message.connect('activate', self.add_object)
+        menu_edit.add(menu_add_message)
         
         vbox.pack_start(self.menu, expand=False)
         
@@ -198,10 +259,12 @@ class LdbBrowser(gtk.Window):
         pane = gtk.HPaned()
         pane.set_position(200)
         treeview_window = gtk.ScrolledWindow()
+        treeview_window.set_shadow_type(gtk.SHADOW_IN)
         treeview_window.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
         treeview_window.add(self.treeview)
         pane.pack1(treeview_window, resize=False, shrink=True)
         attributeview_window = gtk.ScrolledWindow()
+        attributeview_window.set_shadow_type(gtk.SHADOW_IN)
         attributeview_window.set_policy(gtk.POLICY_AUTOMATIC,
             gtk.POLICY_AUTOMATIC)
         attributeview_window.add(self.attributeview)
