@@ -344,11 +344,12 @@ class LdbBrowser(gtk.Window):
                                          gtk.CellRendererText(), text=1))
         pane = gtk.HPaned()
         pane.set_position(200)
+        pane.set_border_width(5)
         treeview_window = gtk.ScrolledWindow()
         treeview_window.set_shadow_type(gtk.SHADOW_IN)
         treeview_window.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
         treeview_window.add(self.treeview)
-        pane.pack1(treeview_window, resize=False, shrink=True)
+        pane.pack1(treeview_window, resize=True, shrink=True)
         attributeview_window = gtk.ScrolledWindow()
         attributeview_window.set_shadow_type(gtk.SHADOW_IN)
         attributeview_window.set_policy(gtk.POLICY_AUTOMATIC,
