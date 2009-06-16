@@ -52,6 +52,7 @@ class LdbURLDialog(gtk.Dialog):
         self.show_all()
         
     def get_url(self):
+        """Return url."""
         return self.url.get_text()
 
 
@@ -59,9 +60,14 @@ class AddObjectDialog(gtk.Dialog):
     """Dialog that prompts for an object name, classes and properties."""
     
     def __init__(self, parent=None):
+        """Create a new AddObjectDialog.
+        
+        parent -- Parent window.
+        """
         super(AddObjectDialog, self).__init__(parent=parent,
             buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
-                     gtk.STOCK_ADD, gtk.RESPONSE_OK))
+                     gtk.STOCK_ADD, gtk.RESPONSE_OK),
+            title="Add an object")
         
         hbox = gtk.HBox()
         hbox.set_border_width(5)
@@ -73,7 +79,7 @@ class AddObjectDialog(gtk.Dialog):
         self.show_all()
         
     def get_dn(self):
-        """Returns DN string"""
+        """Return a DN string"""
         return self.dn_entry.get_text()
 
 
@@ -149,6 +155,9 @@ class LdbBrowser(gtk.Window):
     def _fill_tree(self):
         def _first_level(msg):
             """Return list of DN without parent."""
+            # TODO: it's actually works only for one-level messages
+            # don't works for example if ldb contains
+            # messages "DC=ru" and "DC=example,DC=com"
             lev = sys.maxint
             ret = []
             spec = []
@@ -188,10 +197,18 @@ class LdbBrowser(gtk.Window):
                     continue
                 for val in set(el):
                     self.attributemodel.append([name, val, el])
-
-        
+                    
     def add_object(self, action):
-        """Adds object to ldb, and appends it to tree."""
+        """Add object to ldb, and append it to tree."""
+        if self.ldb == None:
+            dialog = gtk.MessageDialog(self,
+                gtk.DIALOG_DESTROY_WITH_PARENT | gtk.DIALOG_MODAL,
+                gtk.MESSAGE_INFO, gtk.BUTTONS_CLOSE,
+                "Connect to LDB database first.")
+            # Close dialog on user response
+            dialog.connect ("response", lambda d, r: d.destroy())
+            dialog.show()
+            return
         dialog = AddObjectDialog()
         if dialog.run() == gtk.RESPONSE_OK:
             try:
@@ -200,12 +217,17 @@ class LdbBrowser(gtk.Window):
                 dn = ldb.Dn(self.ldb, _dn)
                 msg = ldb.Message(dn)
                 self.ldb.add(msg)
-                parent_dn = dn.parent()
-                if parent_dn.is_valid() and \
-                    str(parent_dn) in self.treenodes.keys():
-                        self._add_node(dn, str(parent_dn))
-                else:
-                    self._add_node(dn)
+                # ldb.add cause ldb to add more than one entry
+                # DC=test
+                # @BASEINFO
+                # |-DC=test
+#                parent_dn = dn.parent()
+#                if parent_dn.is_valid() and \
+#                    str(parent_dn) in self.treenodes.keys():
+#                        self._add_node(dn, str(parent_dn))
+#                else:
+#                    self._add_node(dn)
+                self._fill_tree()
             except (ldb.LdbError, ValueError), err:
                 dialog2 = gtk.MessageDialog(self,
                     gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
@@ -213,9 +235,45 @@ class LdbBrowser(gtk.Window):
                 # Close dialog on user response
                 dialog2.connect ("response", lambda d, r: d.destroy())
                 dialog2.show()
+        else:
+            dialog.destroy()
+            
+    def _cb_delete_object(self, action):
+        """Show dialog that prompts for DN, and delete it."""
+        if self.ldb == None:
+            dialog = gtk.MessageDialog(self,
+                gtk.DIALOG_DESTROY_WITH_PARENT | gtk.DIALOG_MODAL,
+                gtk.MESSAGE_INFO, gtk.BUTTONS_CLOSE,
+                "Connect to LDB database first.")
+            # Close dialog on user response
+            dialog.connect ("response", lambda d, r: d.destroy())
+            dialog.show()
+            return
+        dialog = gtk.Dialog(parent=self, buttons=(gtk.STOCK_CANCEL,
+            gtk.RESPONSE_CANCEL, gtk.STOCK_DELETE, gtk.RESPONSE_OK),
+            title="Enter DN:")
+        dn_entry = gtk.Entry()
+        dialog.vbox.add(dn_entry)
+        dialog.show_all()
+        if dialog.run() == gtk.RESPONSE_OK:
+            try:
+                _dn = dn_entry.get_text()
+                dialog.destroy()
+                self.ldb.delete(ldb.Dn(self.ldb, _dn))
+                self._fill_tree()
+            except (ldb.LdbError, ValueError), err:
+                dialog2 = gtk.MessageDialog(self,
+                    gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
+                    gtk.BUTTONS_CLOSE, str(err))
+                # Close dialog on user response
+                dialog2.connect ("response", lambda d, r: d.destroy())
+                dialog2.show()
+        else:
+            dialog.destroy()
 
 
     def __init__(self):
+        """Create a new LdbBrowser."""
         super(LdbBrowser, self).__init__()
         vbox = gtk.VBox(spacing=0)
         
@@ -255,13 +313,17 @@ class LdbBrowser(gtk.Window):
         
         # Record menu
         menuitem_edit = gtk.MenuItem("_Record")
-        menu_edit = gtk.Menu()
-        menuitem_edit.set_submenu(menu_edit)
+        self.menu_edit = gtk.Menu()
+        menuitem_edit.set_submenu(self.menu_edit)
         self.menu.add(menuitem_edit)
         
         menu_add_message = gtk.ImageMenuItem(gtk.STOCK_ADD)
         menu_add_message.connect('activate', self.add_object)
-        menu_edit.add(menu_add_message)
+        self.menu_edit.add(menu_add_message)
+        
+        menu_delete_message = gtk.ImageMenuItem(gtk.STOCK_DELETE)
+        menu_delete_message.connect('activate', self._cb_delete_object)
+        self.menu_edit.add(menu_delete_message)
         
         vbox.pack_start(self.menu, expand=False)
         
@@ -301,7 +363,7 @@ class LdbBrowser(gtk.Window):
         self.add(vbox)
         self.connect("destroy", gtk.main_quit)
         self.set_default_size(700, 500)
-        self.set_title("gtkldb")
+        self.set_title("GTKLDB Editor")
         self.show_all()
 
 
