@@ -155,8 +155,8 @@ class LdbBrowser(gtk.Window):
     def _fill_tree(self):
         def _first_level(msg):
             """Return list of DN without parent."""
-            # TODO: it's actually works only for one-level messages
-            # don't works for example if ldb contains
+            # FIXME: this actually work only for one-level messages
+            # for example, it don't work if ldb contains
             # messages "DC=ru" and "DC=example,DC=com"
             lev = sys.maxint
             ret = []
@@ -271,6 +271,13 @@ class LdbBrowser(gtk.Window):
         else:
             dialog.destroy()
 
+    def about_dialog(self):
+        dialog = gtk.AboutDialog()
+        dialog.set_name(self.get_title())
+        dialog.set_website("http://www.samba.org/")
+        ## Close dialog on user response
+        dialog.connect ("response", lambda d, r: d.destroy())
+        dialog.show()
 
     def __init__(self):
         """Create a new LdbBrowser."""
@@ -280,7 +287,7 @@ class LdbBrowser(gtk.Window):
         # Menu
         self.menu = gtk.MenuBar()
         
-        # Database menu
+        # menu_db
         menuitem_db = gtk.MenuItem("_Database")
         menu_db = gtk.Menu()
         menuitem_db.set_submenu(menu_db)
@@ -311,7 +318,7 @@ class LdbBrowser(gtk.Window):
         menu_exit.connect('activate', lambda x: gtk.main_quit())
         menu_db.add(menu_exit)
         
-        # Record menu
+        # menu_edit
         menuitem_edit = gtk.MenuItem("_Record")
         self.menu_edit = gtk.Menu()
         menuitem_edit.set_submenu(self.menu_edit)
@@ -324,6 +331,16 @@ class LdbBrowser(gtk.Window):
         menu_delete_message = gtk.ImageMenuItem(gtk.STOCK_DELETE)
         menu_delete_message.connect('activate', self._cb_delete_object)
         self.menu_edit.add(menu_delete_message)
+        
+        # menu_help
+        menuitem_help = gtk.MenuItem("_Help")
+        self.menu_help = gtk.Menu()
+        menuitem_help.set_submenu(self.menu_help)
+        self.menu.add(menuitem_help)
+        
+        menu_about = gtk.ImageMenuItem(gtk.STOCK_ABOUT)
+        menu_about.connect('activate', lambda x: self.about_dialog())
+        self.menu_help.add(menu_about)
         
         vbox.pack_start(self.menu, expand=False)
         
