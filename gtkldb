@@ -23,10 +23,13 @@
 
 import os
 import sys
+
 import gtk
 import gobject
+
 import ldb
 
+DEBUG = False
 
 class LdbURLDialog(gtk.Dialog):
     """Dialog that prompts for a LDB URL.
@@ -72,7 +75,7 @@ class AddObjectDialog(gtk.Dialog):
         hbox = gtk.HBox()
         hbox.set_border_width(5)
         hbox.set_spacing(5)
-        hbox.pack_start(gtk.Label("DN:"), expand=False)
+        hbox.pack_start(gtk.Label("Enter DN:"), expand=False)
         self.dn_entry = gtk.Entry()
         hbox.pack_end(self.dn_entry)
         self.vbox.add(hbox)
@@ -83,7 +86,7 @@ class AddObjectDialog(gtk.Dialog):
         return self.dn_entry.get_text()
 
 
-def Ldb(url):
+def get_ldb(url):
     """Create a new LDB object.
     
     url -- LDB URL to connect to.
@@ -96,11 +99,91 @@ def Ldb(url):
     return ret
 
 
+def get_rdn(dn):
+    """Get relative distinguished name of distinguished name dn."""
+    _len = dn.find(",")
+    if _len == -1:
+        return dn
+    else:
+        return dn[:_len]
+
+
+class DnTree:
+    """Represents set of dn as a tree."""
+    
+    def __init__(self, all_dn):
+        
+        self.childs = {}
+        self.parent = {}
+        self.fake_parent = {}
+        
+        self.dn_set = set()
+        
+        self.parent[""] = ""
+        
+        for dn in all_dn:
+            self.add(dn)
+    
+    def get_roots(self):
+        
+        return self.childs[""]
+    
+    def get_parent_dn(self, dn):
+        """Get distinguished name of parent node."""
+        _len = dn.find(",")
+        if _len == -1:
+            return ""
+        else:
+            if dn[_len+1:] in self.dn_set:
+                return dn[_len+1:]
+            else:
+                return ""
+    
+    def add(self, dn):
+        """Add node to tree."""
+        self.dn_set.add(dn)
+        
+        parent_dn = self.get_parent_dn(dn)
+
+        _len = dn.find(",")
+        if _len != -1:
+            fake_parent = dn[_len+1:]
+            if parent_dn != fake_parent:
+                try:
+                    self.fake_parent[fake_parent].append(dn)
+                except KeyError:
+                    self.fake_parent[fake_parent] = [dn]
+                    
+        self.parent[dn] = parent_dn
+        try:
+            self.childs[parent_dn].append(dn)
+        except KeyError:
+            self.childs[parent_dn] = [dn]
+            
+        try:
+            for i in self.fake_parent[dn]:
+                self.childs[""].remove(i)
+                self.parent[i] = dn
+                try:
+                    self.childs[dn].append(i)
+                except KeyError:
+                    self.childs[dn] = [i]
+        except KeyError:
+            pass
+            
+    def remove(self, dn):
+        """Remove node from tree."""
+        parent = self.get_parent_dn(dn)
+        self.childs[parent].remove(dn)
+        self.parent.pop(dn)
+        
+
 class LdbBrowser(gtk.Window):
     """GTK+ based LDB browser."""
     
     ldb = None
-    hide_special = False
+    hide_special = True
+    tree = None
     
     def set_ldb(self, ldb):
         """Change the LDB object displayed.
@@ -110,13 +193,13 @@ class LdbBrowser(gtk.Window):
         """
         self.ldb = ldb
         self.menu_disconnect.set_sensitive(True)
-        self._fill_tree()
+        self.rebuild_tree()
         
     def _cb_connect(self, button):
         dialog = LdbURLDialog()
         if dialog.run() == gtk.RESPONSE_OK:
             try:
-                self.set_ldb(Ldb(dialog.get_url()))
+                self.set_ldb(get_ldb(dialog.get_url()))
             except ldb.LdbError, err:
                 dialog2 = gtk.MessageDialog(self,
                     gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
@@ -132,7 +215,7 @@ class LdbBrowser(gtk.Window):
             buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
                 gtk.STOCK_OPEN, gtk.RESPONSE_OK))
         if dialog.run() == gtk.RESPONSE_OK:
-            self.set_ldb(Ldb(dialog.get_filename()))
+            self.set_ldb(get_ldb(dialog.get_filename()))
             
         dialog.destroy()
         
@@ -142,49 +225,92 @@ class LdbBrowser(gtk.Window):
         self.menu_disconnect.set_sensitive(False)
         self.ldb = None
         
-    def _add_node(self, dn, parent=""):
-        if dn.is_special() and self.hide_special:
-            return None
-        _dn = str(dn)
-        text = _dn[:len(_dn)-len(parent)].rstrip(",")
-        self.treenodes[_dn] = self.treemodel.append(
-            self.treenodes[parent], [text, dn])
-        for i in self.ldb.search(dn, ldb.SCOPE_ONELEVEL, None, ['dn']):
-            self._add_node(i.dn, _dn)
-            
-    def _fill_tree(self):
-        def _first_level(msg):
-            """Return list of DN without parent."""
-            # FIXME: this actually work only for one-level messages
-            # for example, it don't work if ldb contains
-            # messages "DC=ru" and "DC=example,DC=com"
-            lev = sys.maxint
-            ret = []
-            spec = []
-            for i in msg:
-                dn = i.dn
-                l = str(dn).count(',')
-                if dn.is_special():
-                    spec.append(dn)
-                elif l < lev:
-                    ret = [dn]
-                    lev = l
-                elif l == lev:
-                    ret.append(dn)
-            return ret + spec
+    def add_node(self, dn, parent_dn=None, parent_node=None, text=None):
+        """Add node to treemodel.
+        
+        dn          --- distinguished name of node (str)
+        parent_dn   --- distinguished name of parent node (str)
+        parent_node --- parent node (gtk.TreeIter)
+        text        --- caption of node (str)
+        """
+        if parent_dn == None: parent_dn = self.tree.get_parent_dn(dn)
+        if parent_node == None: parent_node = self.treenodes[parent_dn]
+        if text == None: text = get_rdn(dn)
+        
+        if DEBUG == True:
+            print "Adding node", dn
+            print "parent:", parent_dn
+            print "parent node:", parent_node
+            print "text:", text
+        
+        cur_node = self.treemodel.append(parent_node, [text, dn, True])
+        self.treenodes[dn] = cur_node
+        
+        if dn in self.tree.childs.keys():
+            for child in self.tree.childs[dn]:
+                self.add_node(child, dn, cur_node)
+                
+    def remove_node(self, dn):
+        """Remove node from treemodel.
+        
+        dn --- distinguished name of node to remove (str)
+        """
+        
+        self.treemodel.remove(self.treenodes[dn])
+        self.treenodes.pop(dn)
+        
+    def get_all_dn_set(self):
+        """Return set of dn strings of elements in database."""
+        if self.hide_special:
+            return set(map(lambda x: str(x.dn),
+                                  filter(lambda x: not x.dn.is_special(),
+                                        self.ldb.search(attrs=['dn']))))
+        else:
+            return set(map(lambda x: str(x.dn),
+                                        self.ldb.search(attrs=['dn'])))
+        
+    def rebuild_tree(self):
+        """Rebuild LDB tree and display it in treeview."""
+        
+        self.tree = DnTree(self.get_all_dn_set())
         
         self.treemodel.clear()
         self.treenodes = {}
         self.treenodes[""] = None
         
-        for dn in _first_level(self.ldb.search(None, ldb.SCOPE_SUBTREE,
-                                                   None, ['dn'])):
-            self._add_node(dn)
+        root_dn = self.tree.childs[""]
+        root_dn.sort()
+        for dn in root_dn:
+            self.add_node(dn, "", text=dn)
+        
+    def sync_tree(self):
+        """Syncronize tree and treeview with database after minor change."""
+        
+        old_dn_set = self.tree.dn_set
+        new_dn_set = self.get_all_dn_set()
+        
+        dn_to_remove = old_dn_set.difference(new_dn_set)
+        print "Dn to remove:", dn_to_remove
+        for dn in dn_to_remove:
+            self.tree.remove(dn)
+            self.remove_node(dn)
+        
+        dn_to_add = new_dn_set.difference(old_dn_set)
+        print "Dn to add:", dn_to_add
+        for dn in dn_to_add:
+            self.tree.add(dn)
             
+        for dn in DnTree(dn_to_add).get_roots():
+            print "Adding", dn
+            DEBUG = True
+            self.add_node(dn)
+            DEBUG = False
+        
+        
     def _toggle_special_entries(self, item):
         self.hide_special = item.get_active()
         if self.ldb != None:
-            self._fill_tree()
+            self.rebuild_tree()
             
     def _treeview_cursor_cb(self, item):
         (model, iter) = item.get_selection().get_selected()
@@ -198,8 +324,8 @@ class LdbBrowser(gtk.Window):
                 for val in set(el):
                     self.attributemodel.append([name, val, el])
                     
-    def add_object(self, action):
-        """Add object to ldb, and append it to tree."""
+    def _add_object(self, action):
+        """Add object to ldb and treeview."""
         if self.ldb == None:
             dialog = gtk.MessageDialog(self,
                 gtk.DIALOG_DESTROY_WITH_PARENT | gtk.DIALOG_MODAL,
@@ -209,25 +335,14 @@ class LdbBrowser(gtk.Window):
             dialog.connect ("response", lambda d, r: d.destroy())
             dialog.show()
             return
-        dialog = AddObjectDialog()
+        dialog = AddObjectDialog(parent=self)
         if dialog.run() == gtk.RESPONSE_OK:
             try:
-                _dn = dialog.get_dn()
+                dn = dialog.get_dn()
                 dialog.destroy()
-                dn = ldb.Dn(self.ldb, _dn)
-                msg = ldb.Message(dn)
+                msg = ldb.Message(ldb.Dn(self.ldb, dn))
                 self.ldb.add(msg)
-                # ldb.add cause ldb to add more than one entry
-                # DC=test
-                # @BASEINFO
-                # |-DC=test
-#                parent_dn = dn.parent()
-#                if parent_dn.is_valid() and \
-#                    str(parent_dn) in self.treenodes.keys():
-#                        self._add_node(dn, str(parent_dn))
-#                else:
-#                    self._add_node(dn)
-                self._fill_tree()
+                self.sync_tree()
             except (ldb.LdbError, ValueError), err:
                 dialog2 = gtk.MessageDialog(self,
                     gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
@@ -238,7 +353,7 @@ class LdbBrowser(gtk.Window):
         else:
             dialog.destroy()
             
-    def _cb_delete_object(self, action):
+    def _delete_object(self, action):
         """Show dialog that prompts for DN, and delete it."""
         if self.ldb == None:
             dialog = gtk.MessageDialog(self,
@@ -260,7 +375,7 @@ class LdbBrowser(gtk.Window):
                 _dn = dn_entry.get_text()
                 dialog.destroy()
                 self.ldb.delete(ldb.Dn(self.ldb, _dn))
-                self._fill_tree()
+                self.sync_tree()
             except (ldb.LdbError, ValueError), err:
                 dialog2 = gtk.MessageDialog(self,
                     gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
@@ -270,6 +385,25 @@ class LdbBrowser(gtk.Window):
                 dialog2.show()
         else:
             dialog.destroy()
+            
+    def _dn_cell_edited(self, cell, path_string, new_rdn):
+        
+        iter = self.treemodel.get_iter_from_string(path_string)
+        
+        old_dn = self.treemodel[iter][1]
+        old_rdn = get_rdn(old_dn)
+        
+        parent_dn = self.tree.parent[old_dn]
+        
+        if parent_dn != "":
+            new_dn = new_rdn + "," + parent_dn
+        else:
+            new_dn = new_rdn
+        
+        print old_dn, "-->", new_dn
+        self.ldb.rename(ldb.Dn(self.ldb, old_dn), new_dn)
+        
+        self.sync_tree()
 
     def about_dialog(self):
         dialog = gtk.AboutDialog()
@@ -309,6 +443,7 @@ class LdbBrowser(gtk.Window):
         menu_db.add(gtk.SeparatorMenuItem())
         
         menu_hide_special = gtk.CheckMenuItem("_Hide special entries")
+        menu_hide_special.set_active(self.hide_special)
         menu_hide_special.connect('toggled', self._toggle_special_entries)
         menu_db.add(menu_hide_special)
         
@@ -325,11 +460,11 @@ class LdbBrowser(gtk.Window):
         self.menu.add(menuitem_edit)
         
         menu_add_message = gtk.ImageMenuItem(gtk.STOCK_ADD)
-        menu_add_message.connect('activate', self.add_object)
+        menu_add_message.connect('activate', self._add_object)
         self.menu_edit.add(menu_add_message)
         
         menu_delete_message = gtk.ImageMenuItem(gtk.STOCK_DELETE)
-        menu_delete_message.connect('activate', self._cb_delete_object)
+        menu_delete_message.connect('activate', self._delete_object)
         self.menu_edit.add(menu_delete_message)
         
         # menu_help
@@ -344,14 +479,22 @@ class LdbBrowser(gtk.Window):
         
         vbox.pack_start(self.menu, expand=False)
         
+        # DN's view
         self.treeview = gtk.TreeView()
         self.treemodel = gtk.TreeStore(gobject.TYPE_STRING,
-            gobject.TYPE_PYOBJECT)
+                                       gobject.TYPE_STRING,
+                                       gobject.TYPE_BOOLEAN)
         self.treeview.set_model(self.treemodel)
         self.treeview.set_headers_visible(False)
+        
+        renderer = gtk.CellRendererText()
+        renderer.connect("edited", self._dn_cell_edited)
+        
         self.treeview.append_column(gtk.TreeViewColumn("_Dn",
-                                    gtk.CellRendererText(), text=0))
+                                    renderer, text=0, editable=2))
         self.treeview.connect("cursor-changed", self._treeview_cursor_cb)
+        
+        # Attributes view
         self.attributeview = gtk.TreeView()
         self.attributemodel = gtk.ListStore(str, str, gobject.TYPE_PYOBJECT)
         self.attributeview.set_model(self.attributemodel)
@@ -359,26 +502,32 @@ class LdbBrowser(gtk.Window):
                                          gtk.CellRendererText(), text=0))
         self.attributeview.append_column(gtk.TreeViewColumn("_Value",
                                          gtk.CellRendererText(), text=1))
+        
+        # DN's window
         pane = gtk.HPaned()
         pane.set_position(200)
-        pane.set_border_width(5)
         treeview_window = gtk.ScrolledWindow()
         treeview_window.set_shadow_type(gtk.SHADOW_IN)
         treeview_window.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
         treeview_window.add(self.treeview)
         pane.pack1(treeview_window, resize=True, shrink=True)
+        
+        # Attributes window
         attributeview_window = gtk.ScrolledWindow()
         attributeview_window.set_shadow_type(gtk.SHADOW_IN)
         attributeview_window.set_policy(gtk.POLICY_AUTOMATIC,
             gtk.POLICY_AUTOMATIC)
         attributeview_window.add(self.attributeview)
         pane.pack2(attributeview_window, shrink=True)
+        
         vbox.pack_start(pane, fill=True, expand=True)
         
+        # Statusbar
         self.statusbar = gtk.Statusbar()
         vbox.pack_end(self.statusbar, expand=False)
         
         self.add(vbox)
+        
         self.connect("destroy", gtk.main_quit)
         self.set_default_size(700, 500)
         self.set_title("GTKLDB Editor")
@@ -388,7 +537,7 @@ class LdbBrowser(gtk.Window):
 def main():
     browser = LdbBrowser()
     if len(sys.argv) > 1:
-        browser.set_ldb(Ldb(sys.argv[1]))
+        browser.set_ldb(get_ldb(sys.argv[1]))
     gtk.main()
     
 if __name__ == "__main__":
