@@ -29,7 +29,7 @@ import gobject
 
 import ldb
 
-DEBUG = True
+DEBUG = False
 
 class LdbURLDialog(gtk.Dialog):
     """Dialog that prompts for a LDB URL.
@@ -125,6 +125,7 @@ class DnTree:
         self.dn_set = set()
         
         self.parent[""] = ""
+        self.childs[""] = [] # used by get_roots()
         
         for dn in all_dn:
             self.add(dn)
@@ -186,6 +187,10 @@ class DnTree:
         
         dn --- distinguished name of node.
         """
+        
+        if DEBUG:
+            print 'tree add %s' % dn
+            
         if dn in self.dn_set:
             raise ValueError('A record with dn=%s already exists!' % dn)
         self.dn_set.add(dn)
@@ -390,11 +395,14 @@ class LdbBrowser(gtk.Window):
         
         self.tree = DnTree(self.get_all_dn_set())
         
+        if DEBUG:
+            print self.tree
+        
         self.treemodel.clear()
         self.treenodes = {}
         self.treenodes[""] = None
         
-        root_dn = self.tree.childs[""]
+        root_dn = self.tree.get_roots()
         root_dn.sort()
         for dn in root_dn:
             self.add_node(dn, "", text=dn)
@@ -416,9 +424,6 @@ class LdbBrowser(gtk.Window):
             self.remove_node(dn)
             self.tree.remove(dn)
         
-        if DEBUG:
-            print self.treenodes.keys()
-        
         dn_to_add = new_dn_set.difference(self.tree.dn_set)
         
         if DEBUG:
@@ -437,7 +442,7 @@ class LdbBrowser(gtk.Window):
     def _toggle_special_entries(self, item):
         self.hide_special = not self.hide_special
         if self.ldb != None:
-            self.rebuild_tree()
+            self.sync_tree()
             
     def _treeview_cursor_cb(self, item):
         (model, iter) = item.get_selection().get_selected()
