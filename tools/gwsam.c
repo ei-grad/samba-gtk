@@ -28,6 +28,7 @@
 #include "common/gtk-smb.h"
 #include <credentials.h>
 #include <param.h>
+#include <tevent.h>
 #include <util/debug.h>
 
 struct policy_handle sam_handle;
@@ -39,6 +40,7 @@ GtkListStore *store_users;
 GtkListStore *store_groups;
 static GtkWidget *mnu_disconnect;
 struct loadparm_context *lp_ctx;
+struct tevent_context *ev_ctx;
 
 static void update_grouplist(void)
 {
@@ -132,7 +134,8 @@ static void connect_sam(void)
 
 	mem_ctx = talloc_init("gwsam_connect");
 
-	sam_pipe = gtk_connect_rpc_interface(talloc_autofree_context(), lp_ctx, &ndr_table_samr);
+	sam_pipe = gtk_connect_rpc_interface(talloc_autofree_context(), ev_ctx, 
+										 lp_ctx, &ndr_table_samr);
 
 	if (!sam_pipe)
 		return;
@@ -446,6 +449,7 @@ int main(int argc, char **argv)
 
 	dcerpc_init(lp_ctx);
 
+	ev_ctx = tevent_context_init(lp_ctx);
 	gtk_init(&argc, &argv);
 	mainwin = create_mainwindow();
 	gtk_widget_show_all(mainwin);
