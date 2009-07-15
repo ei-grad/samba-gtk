@@ -29,7 +29,7 @@ import gobject
 
 import ldb
 
-DEBUG = False
+DEBUG = True
 
 class LdbURLDialog(gtk.Dialog):
     """Dialog that prompts for a LDB URL.
@@ -98,9 +98,11 @@ def get_ldb(url):
     ret.connect(url)
     return ret
 
-
 def get_rdn(dn):
-    """Get relative distinguished name of distinguished name dn."""
+    """Get relative distinguished name.
+    
+    dn --- distinguished name
+    """
     _len = dn.find(",")
     if _len == -1:
         return dn
@@ -111,8 +113,11 @@ def get_rdn(dn):
 class DnTree:
     """Represents set of dn as a tree."""
     
-    def __init__(self, all_dn):
+    def __init__(self, all_dn=set()):
+        """Initialize tree.
         
+        all_dn --- set of dn to add in tree
+        """
         self.childs = {}
         self.parent = {}
         self.fake_parent = {}
@@ -123,13 +128,39 @@ class DnTree:
         
         for dn in all_dn:
             self.add(dn)
+            
+    def __str__(self):
+        
+        def print_dn(dn, offset=0):
+            if self.parent[dn] == "":
+                ret1 = "%s%s\n" % ( " " * offset, dn)
+            else:
+                ret1 = "%s%s\n" % ( " " * offset, get_rdn(dn))
+            try:
+                for i in self.childs[dn]:
+                    ret1 += print_dn(i, offset+4)
+            except KeyError:
+                pass
+            finally:
+                return ret1
+            
+        ret = ""
+        for i in self.get_roots():
+            ret += print_dn(i)
+        return ret
     
     def get_roots(self):
-        
-        return self.childs[""]
-    
+        """Get list of root nodes of tree."""
+        try:
+            return self.childs[""]
+        except KeyError:
+            return []
+            
     def get_parent_dn(self, dn):
-        """Get distinguished name of parent node."""
+        """Get distinguished name of parent node is this tree.
+        
+        dn --- distinguished name of node, which parent to return
+        """
         _len = dn.find(",")
         if _len == -1:
             return ""
@@ -138,21 +169,35 @@ class DnTree:
                 return dn[_len+1:]
             else:
                 return ""
+            
+    def get_fake_parent_dn(self, dn):
+        """Get distinguished name of node that should be a parent node of node dn.
+        
+        dn --- distinguished name of node, which parent to return
+        """
+        _len = dn.find(",")
+        if _len == -1:
+            return ""
+        else:
+            return dn[_len+1:]
     
     def add(self, dn):
-        """Add node to tree."""
+        """Add node to tree.
+        
+        dn --- distinguished name of node.
+        """
+        if dn in self.dn_set:
+            raise ValueError('A record with dn=%s already exists!' % dn)
         self.dn_set.add(dn)
         
         parent_dn = self.get_parent_dn(dn)
-
-        _len = dn.find(",")
-        if _len != -1:
-            fake_parent = dn[_len+1:]
-            if parent_dn != fake_parent:
-                try:
-                    self.fake_parent[fake_parent].append(dn)
-                except KeyError:
-                    self.fake_parent[fake_parent] = [dn]
+        fake_parent = self.get_fake_parent_dn(dn)
+        
+        if parent_dn != fake_parent:
+            try:
+                self.fake_parent[fake_parent].append(dn)
+            except KeyError:
+                self.fake_parent[fake_parent] = [dn]
                     
         self.parent[dn] = parent_dn
         try:
@@ -161,7 +206,7 @@ class DnTree:
             self.childs[parent_dn] = [dn]
             
         try:
-            for i in self.fake_parent[dn]:
+            for i in self.fake_parent.pop(dn):
                 self.childs[""].remove(i)
                 self.parent[i] = dn
                 try:
@@ -171,19 +216,62 @@ class DnTree:
         except KeyError:
             pass
             
+    def rename(self, old_dn, new_dn):
+        """Rename node.
+        
+        old_dn --- old distinguished name of node.
+        new_dn --- new distinguished name of node.
+        """
+        if old_dn not in self.dn_set:
+            raise ValueError('A record with dn=%s doesn\'t exists!' % new_dn)
+        if new_dn in self.dn_set:
+            raise ValueError('A record with dn=%s already exists!' % new_dn)
+        self.remove(old_dn)
+        self.add(new_dn)
+        
     def remove(self, dn):
-        """Remove node from tree."""
+        """Remove node from tree.
+        
+        dn --- distinguished name of node.
+        """
+        
+        if dn not in self.dn_set:
+            raise ValueError('A record with dn=%s doesn\'t exists!' % dn)
+        
         parent = self.get_parent_dn(dn)
+        
         self.childs[parent].remove(dn)
+        
+        if dn in self.childs.keys():
+            for i in self.childs[dn]:
+                self.remove(i)
+            if DEBUG:
+                if len(self.childs[dn]) > 0:
+                    print 'error!'
+            self.childs.pop(dn)
+                
         self.parent.pop(dn)
         
+        if DEBUG:
+            if dn in self.fake_parent.keys():
+                print 'Strange, %s in fake_parent.' % dn
+        
+        self.dn_set.remove(dn)
+
+
+def print_ldb_tree(url):
+    """Prints ldb tree.
+    
+    url --- Ldb url to connect.
+    """
+    
+    print(DnTree(set(map(lambda x: str(x.dn),
+                     filter(lambda x: not x.dn.is_special(),
+                            get_ldb(url).search(attrs=['dn']))))))
+
 
 class LdbBrowser(gtk.Window):
     """GTK+ based LDB browser."""
-    
-    ldb = None
-    hide_special = True
-    tree = None
     
     def set_ldb(self, ldb):
         """Change the LDB object displayed.
@@ -235,16 +323,31 @@ class LdbBrowser(gtk.Window):
         """
         if parent_dn == None: parent_dn = self.tree.get_parent_dn(dn)
         if parent_node == None: parent_node = self.treenodes[parent_dn]
-        if text == None: text = get_rdn(dn)
+        if text == None:
+            if parent_dn == "":
+                text = dn
+            else:
+                text = get_rdn(dn)
         
-        if DEBUG == True:
-            print "Adding node", dn
-            print "parent:", parent_dn
-            print "parent node:", parent_node
-            print "text:", text
+        if DEBUG:
+            print "add_node: adding node", dn
+            print "add_node: parent:", parent_dn
+            print "add_node: parent iter:", parent_node
+            print "add_node: text:", text
+        
+        if dn in self.treenodes.keys():
+            if DEBUG:
+                print "add_node: old entry found"
+            self.remove_node(dn)
+            if DEBUG:
+                print "add_node: old entry removed."
         
         cur_node = self.treemodel.append(parent_node, [text, dn, True])
         self.treenodes[dn] = cur_node
+        
+        if DEBUG:
+            print "add_node: new iter:", cur_node
+            print
         
         if dn in self.tree.childs.keys():
             for child in self.tree.childs[dn]:
@@ -255,9 +358,12 @@ class LdbBrowser(gtk.Window):
         
         dn --- distinguished name of node to remove (str)
         """
-        
+        if dn in self.tree.childs.keys():
+            for i in self.tree.childs[dn]:
+                self.remove_node(i)
         self.treemodel.remove(self.treenodes[dn])
         self.treenodes.pop(dn)
+        self.tree.remove(dn)
         
     def get_all_dn_set(self):
         """Return set of dn strings of elements in database."""
@@ -285,30 +391,31 @@ class LdbBrowser(gtk.Window):
         
     def sync_tree(self):
         """Syncronize tree and treeview with database after minor change."""
+       
+        if DEBUG: print 'sync_tree: begin'
         
-        old_dn_set = self.tree.dn_set
         new_dn_set = self.get_all_dn_set()
         
-        dn_to_remove = old_dn_set.difference(new_dn_set)
-        print "Dn to remove:", dn_to_remove
-        for dn in dn_to_remove:
-            self.tree.remove(dn)
+        dn_to_remove = self.tree.dn_set.difference(new_dn_set)
+        
+        for dn in DnTree(dn_to_remove).get_roots():
+            if DEBUG: print 'sync_tree: removing %s' % dn
             self.remove_node(dn)
         
-        dn_to_add = new_dn_set.difference(old_dn_set)
-        print "Dn to add:", dn_to_add
+        dn_to_add = new_dn_set.difference(self.tree.dn_set)
+        
         for dn in dn_to_add:
+            if DEBUG: print 'sync_tree: adding %s to tree' % dn
             self.tree.add(dn)
             
         for dn in DnTree(dn_to_add).get_roots():
-            print "Adding", dn
-            DEBUG = True
+            if DEBUG: print 'sync_tree: adding to treemodel %s' % dn
             self.add_node(dn)
-            DEBUG = False
-        
+
+        if DEBUG: print 'sync_tree: end'
         
     def _toggle_special_entries(self, item):
-        self.hide_special = item.get_active()
+        self.hide_special = not self.hide_special
         if self.ldb != None:
             self.rebuild_tree()
             
@@ -353,8 +460,8 @@ class LdbBrowser(gtk.Window):
         else:
             dialog.destroy()
             
-    def _delete_object(self, action):
-        """Show dialog that prompts for DN, and delete it."""
+    def _remove_object(self, action):
+        """Show dialog that prompts for DN, and delete if it is selected."""
         if self.ldb == None:
             dialog = gtk.MessageDialog(self,
                 gtk.DIALOG_DESTROY_WITH_PARENT | gtk.DIALOG_MODAL,
@@ -387,11 +494,20 @@ class LdbBrowser(gtk.Window):
             dialog.destroy()
             
     def _dn_cell_edited(self, cell, path_string, new_rdn):
+        """Rename an element."""
+        
+        # FIXME: don't work with root nodes, that can have rdn consists of
+        # several parts, for example DC=part3,DC=part2,DC=part1
+        
+        # FIXME: don't work with nodes that have childs
         
         iter = self.treemodel.get_iter_from_string(path_string)
         
         old_dn = self.treemodel[iter][1]
         old_rdn = get_rdn(old_dn)
+        
+        if old_rdn == new_rdn:
+            return
         
         parent_dn = self.tree.parent[old_dn]
         
@@ -400,22 +516,35 @@ class LdbBrowser(gtk.Window):
         else:
             new_dn = new_rdn
         
-        print old_dn, "-->", new_dn
+        if DEBUG:
+            print old_dn, "-->", new_dn
+        
         self.ldb.rename(ldb.Dn(self.ldb, old_dn), new_dn)
         
+        self.tree.rename(old_dn, new_dn)
+        
+        self.treemodel.set(iter, 0, new_rdn)
+        self.treemodel.set(iter, 1, new_dn)
+        
         self.sync_tree()
-
+        
     def about_dialog(self):
+        """Show about dialog."""
         dialog = gtk.AboutDialog()
         dialog.set_name(self.get_title())
         dialog.set_website("http://www.samba.org/")
         ## Close dialog on user response
         dialog.connect ("response", lambda d, r: d.destroy())
         dialog.show()
-
+        
     def __init__(self):
         """Create a new LdbBrowser."""
         super(LdbBrowser, self).__init__()
+        
+        self.ldb = None
+        self.hide_special = True
+        self.tree = None
+        
         vbox = gtk.VBox(spacing=0)
         
         # Menu
@@ -464,7 +593,7 @@ class LdbBrowser(gtk.Window):
         self.menu_edit.add(menu_add_message)
         
         menu_delete_message = gtk.ImageMenuItem(gtk.STOCK_DELETE)
-        menu_delete_message.connect('activate', self._delete_object)
+        menu_delete_message.connect('activate', self._remove_object)
         self.menu_edit.add(menu_delete_message)
         
         # menu_help
@@ -539,6 +668,6 @@ def main():
     if len(sys.argv) > 1:
         browser.set_ldb(get_ldb(sys.argv[1]))
     gtk.main()
-    
+
 if __name__ == "__main__":
     main()
