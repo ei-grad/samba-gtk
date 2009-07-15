@@ -243,7 +243,8 @@ class DnTree:
         self.childs[parent].remove(dn)
         
         if dn in self.childs.keys():
-            for i in self.childs[dn]:
+            childs = tuple(self.childs[dn])
+            for i in childs:
                 self.remove(i)
             if DEBUG:
                 if len(self.childs[dn]) > 0:
@@ -358,12 +359,21 @@ class LdbBrowser(gtk.Window):
         
         dn --- distinguished name of node to remove (str)
         """
+        
         if dn in self.tree.childs.keys():
-            for i in self.tree.childs[dn]:
+            childs = tuple(self.tree.childs[dn])
+            for i in childs:
                 self.remove_node(i)
+                
+        if DEBUG:
+            print 'remove_node %s' % dn
+            try:
+                print 'childs:\n    %s' % "\n    ".join(childs)
+            except NameError:
+                pass
+            
         self.treemodel.remove(self.treenodes[dn])
         self.treenodes.pop(dn)
-        self.tree.remove(dn)
         
     def get_all_dn_set(self):
         """Return set of dn strings of elements in database."""
@@ -398,11 +408,21 @@ class LdbBrowser(gtk.Window):
         
         dn_to_remove = self.tree.dn_set.difference(new_dn_set)
         
+        if DEBUG:
+            print 'sync_tree: dn_to_remove\n%s\n' % DnTree(dn_to_remove)
+        
         for dn in DnTree(dn_to_remove).get_roots():
             if DEBUG: print 'sync_tree: removing %s' % dn
             self.remove_node(dn)
+            self.tree.remove(dn)
+        
+        if DEBUG:
+            print self.treenodes.keys()
         
         dn_to_add = new_dn_set.difference(self.tree.dn_set)
+        
+        if DEBUG:
+            print 'sync_tree: dn_to_add\n%s\n' % DnTree(dn_to_add)
         
         for dn in dn_to_add:
             if DEBUG: print 'sync_tree: adding %s to tree' % dn
@@ -447,6 +467,8 @@ class LdbBrowser(gtk.Window):
             try:
                 dn = dialog.get_dn()
                 dialog.destroy()
+                if DEBUG:
+                    print '_add_object: %s' % dn
                 msg = ldb.Message(ldb.Dn(self.ldb, dn))
                 self.ldb.add(msg)
                 self.sync_tree()
@@ -481,6 +503,8 @@ class LdbBrowser(gtk.Window):
             try:
                 _dn = dn_entry.get_text()
                 dialog.destroy()
+                if DEBUG:
+                    print '_remove_object: %s' % _dn
                 self.ldb.delete(ldb.Dn(self.ldb, _dn))
                 self.sync_tree()
             except (ldb.LdbError, ValueError), err:
