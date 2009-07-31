@@ -196,7 +196,8 @@ class DnTree:
                 return ""
             
     def get_fake_parent_dn(self, dn):
-        """Get distinguished name of node that should be a parent node of node dn.
+        """Get distinguished name of node that should be a parent node of node
+        with distinguished name dn, but not in tree.
         
         dn --- distinguished name of node, which parent to return
         """
@@ -205,7 +206,7 @@ class DnTree:
             return ""
         else:
             return dn[_len+1:]
-    
+        
     def add(self, dn):
         """Add node to tree.
         
@@ -302,164 +303,164 @@ def print_ldb_tree(url):
 
 class LdbBrowser(gtk.Window):
     """GTK+ based LDB browser."""
-
+    
     def __init__(self):
         """Create a new LdbBrowser."""
         super(LdbBrowser, self).__init__()
-
+        
         self.ldb = None
         self.hide_special = True
         self.tree = None
-
+        
         # vbox - base container
         vbox = gtk.VBox(spacing=0)
-
-        # BEGIN self.menu
-        self.menu = gtk.MenuBar()
-
-        # menu_db
-        menuitem_db = gtk.MenuItem("_Database")
-        menu_db = gtk.Menu()
-        menuitem_db.set_submenu(menu_db)
-        self.menu.add(menuitem_db)
-
-        menu_connect = gtk.ImageMenuItem(gtk.STOCK_CONNECT)
-        menu_connect.connect('activate', self._cb_connect)
-        menu_db.add(menu_connect)
-
-        menu_open = gtk.ImageMenuItem(gtk.STOCK_OPEN)
-        menu_open.connect('activate', self._cb_open)
-        menu_db.add(menu_open)
-
-        self.menu_disconnect = gtk.ImageMenuItem(gtk.STOCK_DISCONNECT)
-        self.menu_disconnect.connect('activate', self._cb_disconnect)
-        self.menu_disconnect.set_sensitive(False)
-        menu_db.add(self.menu_disconnect)
-
-        menu_db.add(gtk.SeparatorMenuItem())
-
-        menu_hide_special = gtk.CheckMenuItem("_Hide special entries")
-        menu_hide_special.set_active(self.hide_special)
-        menu_hide_special.connect('toggled', self._toggle_special_entries)
-        menu_db.add(menu_hide_special)
-
-        menu_db.add(gtk.SeparatorMenuItem())
-
-        menu_exit = gtk.ImageMenuItem(gtk.STOCK_QUIT)
-        menu_exit.connect('activate', lambda x: gtk.main_quit())
-        menu_db.add(menu_exit)
-
-        # menu_edit
-        menuitem_edit = gtk.MenuItem("_Record")
-        self.menu_edit = gtk.Menu()
-        menuitem_edit.set_submenu(self.menu_edit)
-        self.menu.add(menuitem_edit)
-
-        menu_add_message = gtk.ImageMenuItem(gtk.STOCK_ADD)
-        menu_add_message.connect('activate', self._tree_add_object)
-        self.menu_edit.add(menu_add_message)
-
-        menu_delete_message = gtk.ImageMenuItem(gtk.STOCK_DELETE)
-        menu_delete_message.connect('activate', self._tree_remove_object)
-        self.menu_edit.add(menu_delete_message)
-
-        # menu_help
-        menuitem_help = gtk.MenuItem("_Help")
-        self.menu_help = gtk.Menu()
-        menuitem_help.set_submenu(self.menu_help)
-        self.menu.add(menuitem_help)
-
-        menu_about = gtk.ImageMenuItem(gtk.STOCK_ABOUT)
-        menu_about.connect('activate', lambda x: self.about_dialog())
-        self.menu_help.add(menu_about)
-
-        vbox.pack_start(self.menu, expand=False)
-        # END self.menu
-
-        # popups
-        self.popup1 = gtk.Menu()
-        el = gtk.MenuItem("_Add")
-        el.connect('activate', lambda x: self._msg_add_item())
-        self.popup1.add(el)
-        self.popup1.show_all()
-
+        
+        def menu():
+            
+            self.menu = gtk.MenuBar()
+            
+            # menu_db
+            menuitem_db = gtk.MenuItem("_Database")
+            menu_db = gtk.Menu()
+            menuitem_db.set_submenu(menu_db)
+            self.menu.add(menuitem_db)
+            
+            menu_connect = gtk.ImageMenuItem(gtk.STOCK_CONNECT)
+            menu_connect.connect('activate', self._cb_connect)
+            menu_db.add(menu_connect)
+            
+            menu_open = gtk.ImageMenuItem(gtk.STOCK_OPEN)
+            menu_open.connect('activate', self._cb_open)
+            menu_db.add(menu_open)
+            
+            self.menu_disconnect = gtk.ImageMenuItem(gtk.STOCK_DISCONNECT)
+            self.menu_disconnect.connect('activate', self._cb_disconnect)
+            self.menu_disconnect.set_sensitive(False)
+            menu_db.add(self.menu_disconnect)
+            
+            menu_db.add(gtk.SeparatorMenuItem())
+            
+            menu_hide_special = gtk.CheckMenuItem("_Hide special entries")
+            menu_hide_special.set_active(self.hide_special)
+            menu_hide_special.connect('toggled', self._toggle_special_entries)
+            menu_db.add(menu_hide_special)
+            
+            menu_db.add(gtk.SeparatorMenuItem())
+            
+            menu_exit = gtk.ImageMenuItem(gtk.STOCK_QUIT)
+            menu_exit.connect('activate', lambda x: gtk.main_quit())
+            menu_db.add(menu_exit)
+            
+            # menu_edit
+            menuitem_edit = gtk.MenuItem("_Record")
+            self.menu_edit = gtk.Menu()
+            menuitem_edit.set_submenu(self.menu_edit)
+            self.menu.add(menuitem_edit)
+            
+            menu_add_message = gtk.ImageMenuItem(gtk.STOCK_ADD)
+            menu_add_message.connect('activate', self._tree_add_object)
+            self.menu_edit.add(menu_add_message)
+            
+            menu_delete_message = gtk.ImageMenuItem(gtk.STOCK_DELETE)
+            menu_delete_message.connect('activate', self._tree_remove_object)
+            self.menu_edit.add(menu_delete_message)
+            
+            # menu_help
+            menuitem_help = gtk.MenuItem("_Help")
+            self.menu_help = gtk.Menu()
+            menuitem_help.set_submenu(self.menu_help)
+            self.menu.add(menuitem_help)
+            
+            menu_about = gtk.ImageMenuItem(gtk.STOCK_ABOUT)
+            menu_about.connect('activate', lambda x: self.about_dialog())
+            self.menu_help.add(menu_about)
+            
+            self.menu.show_all()
+            
+            return self.menu
+        
+        vbox.pack_start(menu(), expand=False)
+        
         # gtk.HPaned
         pane = gtk.HPaned()
         pane.set_position(200)
-
-        # BEGIN self.treeview self.treemodel
-        self.treeview = gtk.TreeView()
-        self.treemodel = gtk.TreeStore(gobject.TYPE_STRING,
-                                       gobject.TYPE_STRING,
-                                       gobject.TYPE_BOOLEAN)
-        self.treeview.set_model(self.treemodel)
-        self.treeview.set_headers_visible(False)
-
-        renderer = gtk.CellRendererText()
-        renderer.connect("edited", self._tree_rename_object)
-
-        self.treeview.append_column(gtk.TreeViewColumn("_Dn",
-                                    renderer, text=0, editable=2))
-        self.treeview.connect("cursor-changed", self._treeview_cursor_cb)
-
-        # attach window to HPaned
-        treeview_window = gtk.ScrolledWindow()
-        treeview_window.set_shadow_type(gtk.SHADOW_IN)
-        treeview_window.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
-        treeview_window.add(self.treeview)
-        pane.pack1(treeview_window, resize=True, shrink=True)
-        # END self.treeview self.treemodel
-
-
-        # BEGIN self.attributeview
-        self.attributeview = gtk.TreeView()
-
-        self.attributeview.connect("button-press-event", self._msg_button_press)
-
-        self.attributemodel = gtk.ListStore(str, str, gobject.TYPE_PYOBJECT,
-                                            gobject.TYPE_BOOLEAN)
-        self.attributeview.set_model(self.attributemodel)
-
-        # name column
-        renderer = gtk.CellRendererText()
-        renderer.connect("edited", self._msg_cell_edited)
-        renderer.set_data("column", 0)
-
-        column = gtk.TreeViewColumn("Number", renderer, text=0, editable=3)
-        self.attributeview.append_column(column)
-
-        # value column
-        renderer = gtk.CellRendererText()
-        renderer.connect("edited", self._msg_cell_edited)
-        renderer.set_data("column", 1)
-
-        column = gtk.TreeViewColumn("Value", renderer, text=1, editable=3)
-        self.attributeview.append_column(column)
-
-        # attach window to HPaned
-        attributeview_window = gtk.ScrolledWindow()
-        attributeview_window.set_shadow_type(gtk.SHADOW_IN)
-        attributeview_window.set_policy(gtk.POLICY_AUTOMATIC,
-            gtk.POLICY_AUTOMATIC)
-        attributeview_window.add(self.attributeview)
-        pane.pack2(attributeview_window, shrink=True)
-        # END self.attributeview
-
+        
+        def treeview():
+            
+            self.treeview = gtk.TreeView()
+            self.treemodel = gtk.TreeStore(gobject.TYPE_STRING,
+                                           gobject.TYPE_STRING,
+                                           gobject.TYPE_BOOLEAN)
+            self.treeview.set_model(self.treemodel)
+            self.treeview.set_headers_visible(False)
+            
+            renderer = gtk.CellRendererText()
+            renderer.connect("edited", self._tree_rename_object)
+            
+            self.treeview.append_column(gtk.TreeViewColumn("_Dn",
+                                        renderer, text=0, editable=2))
+            self.treeview.connect("cursor-changed", self._treeview_cursor_cb)
+            
+            window = gtk.ScrolledWindow()
+            window.set_shadow_type(gtk.SHADOW_IN)
+            window.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+            window.add(self.treeview)
+            
+            return window
+        
+        pane.pack1(treeview(), resize=True, shrink=True)
+        
+        def attributeview():
+            
+            self.attributeview = gtk.TreeView()
+            
+            self.attributeview.connect("button-press-event", self._msg_button_press)
+            
+            self.attributemodel = gtk.ListStore(str, str, gobject.TYPE_BOOLEAN)
+            self.attributeview.set_model(self.attributemodel)
+            
+            # name column
+            renderer = gtk.CellRendererText()
+            renderer.connect("edited", self._msg_cell_edited)
+            renderer.set_data("column", 0)
+            
+            column = gtk.TreeViewColumn("Number", renderer, text=0, editable=2)
+            self.attributeview.append_column(column)
+            
+            # value column
+            renderer = gtk.CellRendererText()
+            renderer.connect("edited", self._msg_cell_edited)
+            renderer.set_data("column", 1)
+            
+            column = gtk.TreeViewColumn("Value", renderer, text=1, editable=2)
+            self.attributeview.append_column(column)
+            
+            window = gtk.ScrolledWindow()
+            window.set_shadow_type(gtk.SHADOW_IN)
+            window.set_policy(gtk.POLICY_AUTOMATIC,
+                gtk.POLICY_AUTOMATIC)
+            window.add(self.attributeview)
+            
+            return window
+        
+        pane.pack2(attributeview(), shrink=True)
+        
         # attach pane to vbox
         vbox.pack_start(pane, fill=True, expand=True)
-
+        
         # attach statusbar to vbox
         self.statusbar = gtk.Statusbar()
         vbox.pack_end(self.statusbar, expand=False)
-
+        
         # attach all to window
         self.add(vbox)
-
+        
         # Show window
         self.connect("destroy", gtk.main_quit)
         self.set_default_size(700, 500)
         self.set_title("GTKLDB Editor")
         self.show_all()
+
 
     def set_ldb(self, ldb):
         """Change the LDB object displayed.
@@ -591,7 +592,7 @@ class LdbBrowser(gtk.Window):
         
     def sync_tree(self):
         """Syncronize tree and treeview with database after minor change."""
-       
+        
         if DEBUG: print 'sync_tree: begin'
         
         new_dn_set = self.get_all_dn_set()
@@ -623,30 +624,35 @@ class LdbBrowser(gtk.Window):
             print 'sync_tree: end'
             print 'tree after sync_tree:'
             print self.tree
-        
+            
     def _toggle_special_entries(self, item):
         self.hide_special = not self.hide_special
         if self.ldb != None:
             self.sync_tree()
-
+            
     def refresh_attributes(self):
         """Clear and fill attributemodel."""
         
         self.attributemodel.clear()
-
+        
         msg = self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
-
+        
         for name, el in msg.items():
             if name == "dn":
                 continue
-            for val in set(el):
-                self.attributemodel.append([name, val, el, True])
-
+            el = tuple(el)
+            if DEBUG:
+                print name, el
+            for val in el:
+                if DEBUG:
+                    print "adding", val
+                self.attributemodel.append([name, str(val), True])
+                
     def _treeview_cursor_cb(self, item):
         (model, iter) = item.get_selection().get_selected()
         self.cur_selected_dn = model.get_value(iter, 1)
         self.refresh_attributes()
-                
+        
     def _tree_add_object(self, action):
         """Add object to ldb and treeview."""
         if self.ldb == None:
@@ -736,14 +742,10 @@ class LdbBrowser(gtk.Window):
         
         self.ldb.rename(ldb.Dn(self.ldb, old_dn), new_dn)
         
-        #self.tree.rename(old_dn, new_dn)
-        #self.treemodel.set(iter, 0, new_rdn)
-        #self.treemodel.set(iter, 1, new_dn)
-        
         self.sync_tree()
         
     def _msg_cell_edited(self, cell, path_string, text):
-        """Edit property of element."""
+        """Edit the element."""
         
         column = cell.get_data("column")
         
@@ -753,29 +755,68 @@ class LdbBrowser(gtk.Window):
         old_value = self.attributemodel[iter][1]
         
         if DEBUG:
-            print "Editing attribute %s=%s" % (old_attr, old_value)
+            print "_msg_cell_edited: %s=%s" % (old_attr, old_value)
+
+        if column == 0: # edited name
             
-        if column == 1:
+            if text == old_attr:
+                return
+            
             m = ldb.Message()
             m.dn = ldb.Dn(self.ldb, self.cur_selected_dn)
             m[old_attr] = ldb.MessageElement(old_value,
                 ldb.CHANGETYPE_MODIFY, old_attr)
-
+            
+            if DEBUG:
+                print '_msg_cell_edited: delete attr "%s=%s"' % \
+                    (old_attr, old_value)
+                print m
+            
+            self.ldb.modify(m)
+            
+            m = ldb.Message()
+            m.dn = ldb.Dn(self.ldb, self.cur_selected_dn)
+            m[text] = ldb.MessageElement(old_value,
+                ldb.CHANGETYPE_ADD, text)
+            
+            if DEBUG:
+                print '_msg_cell_edited: add "%s=%s"' % \
+                    (text, old_value)
+                print m
+                
+            self.ldb.modify(m)
+            
+            if DEBUG:
+                print "_msg_cell_edited: modified!"
+                print self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
+            
+            self.refresh_attributes()
+            
+        elif column == 1: # edited value
+            
+            if text == old_value:
+                return
+            
+            m = ldb.Message()
+            m.dn = ldb.Dn(self.ldb, self.cur_selected_dn)
+            m[old_attr] = ldb.MessageElement(old_value,
+                ldb.CHANGETYPE_MODIFY, old_attr)
+            
             if DEBUG:
                 print '_msg_cell_edited: delete ', old_value
                 print m
-
+                
             self.ldb.modify(m)
-
+            
             m = ldb.Message()
             m.dn = ldb.Dn(self.ldb, self.cur_selected_dn)
             m[old_attr] = ldb.MessageElement(text,
                 ldb.CHANGETYPE_ADD, old_attr)
-
+            
             if DEBUG:
-                print '_msg_cell_edited: add', text
+                print '_msg_cell_edited: add "%s"' % text
                 print m
-
+                
             self.ldb.modify(m)
             
             if DEBUG:
@@ -784,26 +825,44 @@ class LdbBrowser(gtk.Window):
                 
             self.refresh_attributes()
             
-    def _msg_add_item(self):
-        m = ldb.Message()
-        m.dn = ldb.Dn(self.ldb, self.cur_selected_dn)
-
-        m['new_attr'] = ldb.MessageElement('value',
-                ldb.CHANGETYPE_ADD, 'new_attr')
-        if DEBUG:
-            print 'message:', m
-            print 'before add:'
-            print self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
-
-        self.ldb.modify(m)
-        
-        if DEBUG:
-            print 'after add:'
-            print self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
-            
-        self.refresh_attributes()
-
     def _msg_button_press(self, treeview, event):
+        
+        def add_item():
+            m = ldb.Message()
+            m.dn = ldb.Dn(self.ldb, self.cur_selected_dn)
+            
+            m['new_attr'] = ldb.MessageElement('value',
+                    ldb.CHANGETYPE_ADD, 'new_attr')
+            if DEBUG:
+                print 'message:', m
+                print 'before add:'
+                print self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
+                
+            self.ldb.modify(m)
+            
+            if DEBUG:
+                print 'after add:'
+                print self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
+                
+            self.refresh_attributes()
+            
+        def delete_item(dn, attr, value):
+            
+            m = ldb.Message()
+            m.dn = ldb.Dn(self.ldb, dn)
+            m[attr] = ldb.MessageElement(value, ldb.CHANGETYPE_MODIFY, attr)
+            
+            if DEBUG:
+                print 'delete_item: delete "%s=%s" from %s' % (attr, value, dn)
+                print 'before:', self.ldb.search(dn, ldb.SCOPE_BASE)[0]
+                
+            self.ldb.modify(m)
+            
+            if DEBUG:
+                print 'after:', self.ldb.search(dn, ldb.SCOPE_BASE)[0]
+                
+            self.refresh_attributes()
+            
         if event.button == 3:
             x = int(event.x)
             y = int(event.y)
@@ -811,15 +870,31 @@ class LdbBrowser(gtk.Window):
             pthinfo = treeview.get_path_at_pos(x, y)
             if pthinfo is not None:
                 path, col, cellx, celly = pthinfo
+                path_str = ":".join(map(str, path))
+                iter = self.attributemodel.get_iter_from_string(path_str)
+                
                 treeview.grab_focus()
-                treeview.set_cursor( path, col, 0)
-                print "Yes!", time
-#                self.attributeview_popup.popup( None, None, None, event.button, time)
+                treeview.set_cursor(path, col, 0)
+                
+                dn = self.cur_selected_dn
+                attr = self.attributemodel[iter][0]
+                value = self.attributemodel[iter][1]
+                
+                popup = gtk.Menu()
+                el = gtk.MenuItem("_Delete")
+                el.connect('activate', lambda x: delete_item(dn, attr, value))
+                popup.add(el)
+                popup.show_all()
+                popup.popup(None, None, None, event.button, time)
             else:
-                self.popup1.popup(None, None, None, event.button, time)
+                self.popup_attr2 = gtk.Menu()
+                el = gtk.MenuItem("_Add")
+                el.connect('activate', lambda x: add_item())
+                self.popup_attr2.add(el)
+                self.popup_attr2.show_all()
+                self.popup_attr2.popup(None, None, None, event.button, time)
                 print "No!", time
-            return
-
+                
     def about_dialog(self):
         """Show about dialog."""
         dialog = gtk.AboutDialog()
@@ -830,8 +905,6 @@ class LdbBrowser(gtk.Window):
         ## Close dialog on user response
         dialog.connect ("response", lambda d, r: d.destroy())
         dialog.show()
-        
-
 
 
 def main():
@@ -842,3 +915,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
