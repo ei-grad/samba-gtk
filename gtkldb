@@ -21,30 +21,6 @@
 
 """Simple GTK+ frontend for LDB."""
 
-# FIXME: bug probably in pyldb (or possibly in python?..)
-# appears only in interactive mode, confirmed for debian...
-'''
-import ldb
-l = ldb.Ldb('test.ldb')
-m = ldb.Message()
-m.dn = ldb.Dn(l, 'DC=test')
-m['qwe'] = 'asd'
-m
-'''
-# and try it in that way:
-'''
-import ldb
-l = ldb.Ldb('test.ldb')
-m = ldb.Message()
-m.dn = ldb.Dn(l, 'DC=test')
-m['qwe'] = 'asd'
-print m
-'''
-
-# FIXME: segfault in pyldb
-# just try to pass just str, not Dn
-# m.dn = "dc=test"
-
 import os
 import sys
 
@@ -53,7 +29,13 @@ import gobject
 
 import ldb
 
-DEBUG = False
+__authors__ = ['Jelmer Vernooij <jelmer@samba.org>',
+               'Andrew Grigorev <andrew@ei-grad.ru>']
+__title__ = "GTKLDB"
+DEBUG = True
+
+# FIXME: seg.fault in pyldb
+# l.search(expression="asdasd", attrs=['dn'])
 
 class LdbURLDialog(gtk.Dialog):
     """Dialog that prompts for a LDB URL.
@@ -81,33 +63,6 @@ class LdbURLDialog(gtk.Dialog):
     def get_url(self):
         """Return url."""
         return self.url.get_text()
-
-
-class AddObjectDialog(gtk.Dialog):
-    """Dialog that prompts for an object name, classes and properties."""
-    
-    def __init__(self, parent=None):
-        """Create a new AddObjectDialog.
-        
-        parent -- Parent window.
-        """
-        super(AddObjectDialog, self).__init__(parent=parent,
-            buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
-                     gtk.STOCK_ADD, gtk.RESPONSE_OK),
-            title="Add an object")
-        
-        hbox = gtk.HBox()
-        hbox.set_border_width(5)
-        hbox.set_spacing(5)
-        hbox.pack_start(gtk.Label("Enter DN:"), expand=False)
-        self.dn_entry = gtk.Entry()
-        hbox.pack_end(self.dn_entry)
-        self.vbox.add(hbox)
-        self.show_all()
-        
-    def get_dn(self):
-        """Return a DN string"""
-        return self.dn_entry.get_text()
 
 
 def get_ldb(url):
@@ -180,7 +135,7 @@ class DnTree:
             return self.childs[""]
         except KeyError:
             return []
-            
+        
     def get_parent_dn(self, dn):
         """Get distinguished name of parent node is this tree.
         
@@ -228,7 +183,7 @@ class DnTree:
                 self.fake_parent[fake_parent].append(dn)
             except KeyError:
                 self.fake_parent[fake_parent] = [dn]
-                    
+                
         self.parent[dn] = parent_dn
         try:
             self.childs[parent_dn].append(dn)
@@ -245,7 +200,7 @@ class DnTree:
                     self.childs[dn] = [i]
         except KeyError:
             pass
-            
+        
     def rename(self, old_dn, new_dn):
         """Rename node.
         
@@ -280,13 +235,13 @@ class DnTree:
                 if len(self.childs[dn]) > 0:
                     print 'error!'
             self.childs.pop(dn)
-                
+            
         self.parent.pop(dn)
         
         if DEBUG:
             if dn in self.fake_parent.keys():
                 print 'Strange, %s in fake_parent.' % dn
-        
+                
         self.dn_set.remove(dn)
 
 
@@ -300,82 +255,118 @@ def print_ldb_tree(url):
                      filter(lambda x: not x.dn.is_special(),
                             get_ldb(url).search(attrs=['dn']))))))
 
-
 class LdbBrowser(gtk.Window):
     """GTK+ based LDB browser."""
     
-    def __init__(self):
+    def __init__(self, parent=None):
         """Create a new LdbBrowser."""
-        super(LdbBrowser, self).__init__()
+        super(self.__class__, self).__init__()
+        try:
+            self.set_screen(parent.get_screen())
+        except AttributeError:
+            self.connect('destroy', lambda *w: gtk.main_quit())
+            
+        self.set_default_size(700, 500)
+        self.set_title(__title__)
         
         self.ldb = None
         self.hide_special = True
         self.tree = None
+        self.cur_selected_dn = None
+        self.search_result = None
         
         # vbox - base container
         vbox = gtk.VBox(spacing=0)
         
         def menu():
             
-            self.menu = gtk.MenuBar()
+            ui_info = \
+'''<ui>
+  <menubar name='MenuBar'>
+    <menu action='DatabaseMenu'>
+      <menuitem action='Connect'/>
+      <menuitem action='Open'/>
+      <menuitem action='Disconnect'/>
+      <separator/>
+      <menuitem action='Quit'/>
+    </menu>
+    <menu action='EditMenu'>
+      <menuitem action='HideSpecial'/>
+      <menuitem action='Find'/>
+      <menuitem action='FindNext'/>
+    </menu>
+    <menu action='HelpMenu'>
+      <menuitem action='About'/>
+    </menu>
+  </menubar>
+</ui>'''
+            def create_action_group():
+                # GtkActionEntry
+                entries = (
+                 ( "DatabaseMenu", None, "_Database" ), # name, stock id, label
+                 ( "EditMenu", None, "_Edit" ),         # name, stock id, label
+                 ( "HelpMenu", None, "_Help" ),         # name, stock id, label
+                 ( "Connect", gtk.STOCK_CONNECT,        # name, stock id
+                   None, "<control>N",                  # label, accelerator
+                   "Connect to database",               # tooltip
+                   self._cb_connect ),
+                 ( "Open", gtk.STOCK_OPEN,              # name, stock id
+                   None,"<control>O",                   # label, accelerator
+                   "Open a file",                       # tooltip
+                   self._cb_open ),
+                 ( "Disconnect", gtk.STOCK_DISCONNECT,  # name, stock id
+                   None,"<control>D",                   # label, accelerator
+                   "Close active connection",           # tooltip
+                    self._cb_disconnect ),
+                 ( "Quit", gtk.STOCK_QUIT,              # name, stock id
+                   None, "<control>Q",                  # label, accelerator
+                   "Quit",                              # tooltip
+                   lambda x: gtk.main_quit() ),
+                 ( "Find", gtk.STOCK_FIND,              # name, stock id
+                   None, "<control>F",                  # label, accelerator
+                   "Find",                              # tooltip
+                   self._cb_find ),
+                 ( "FindNext", None,                    # name, stock id
+                   "Find _next", "F3",                  # label, accelerator
+                   "Find next",                         # tooltip
+                   lambda x: self.find_next() ),
+                 ( "About", gtk.STOCK_ABOUT,            # name, stock id
+                   None, "<control>A",                  # label, accelerator
+                   "About",                             # tooltip
+                   self._cb_about ),
+                )
+                
+                # GtkToggleActionEntry
+                toggle_entries = (
+                 ( "HideSpecial", None,                   # name, stock id
+                   "_Hide special entries", "<control>H", # label, accelerator
+                   "Bold",                                # tooltip
+                   self._toggle_special_entries,
+                   True ),                                # is_active
+                )
+                
+                # Create the menubar and toolbar
+                action_group = gtk.ActionGroup("GTKLDBActions")
+                action_group.add_actions(entries)
+                action_group.add_toggle_actions(toggle_entries)
+                
+                return action_group
             
-            # menu_db
-            menuitem_db = gtk.MenuItem("_Database")
-            menu_db = gtk.Menu()
-            menuitem_db.set_submenu(menu_db)
-            self.menu.add(menuitem_db)
+            merge = gtk.UIManager()
+            self.set_data("ui-manager", merge)
+            merge.insert_action_group(create_action_group(), 0)
+            self.add_accel_group(merge.get_accel_group())
             
-            menu_connect = gtk.ImageMenuItem(gtk.STOCK_CONNECT)
-            menu_connect.connect('activate', self._cb_connect)
-            menu_db.add(menu_connect)
-            
-            menu_open = gtk.ImageMenuItem(gtk.STOCK_OPEN)
-            menu_open.connect('activate', self._cb_open)
-            menu_db.add(menu_open)
-            
-            self.menu_disconnect = gtk.ImageMenuItem(gtk.STOCK_DISCONNECT)
-            self.menu_disconnect.connect('activate', self._cb_disconnect)
-            self.menu_disconnect.set_sensitive(False)
-            menu_db.add(self.menu_disconnect)
-            
-            menu_db.add(gtk.SeparatorMenuItem())
-            
-            menu_hide_special = gtk.CheckMenuItem("_Hide special entries")
-            menu_hide_special.set_active(self.hide_special)
-            menu_hide_special.connect('toggled', self._toggle_special_entries)
-            menu_db.add(menu_hide_special)
-            
-            menu_db.add(gtk.SeparatorMenuItem())
-            
-            menu_exit = gtk.ImageMenuItem(gtk.STOCK_QUIT)
-            menu_exit.connect('activate', lambda x: gtk.main_quit())
-            menu_db.add(menu_exit)
-            
-            # menu_edit
-            menuitem_edit = gtk.MenuItem("_Record")
-            self.menu_edit = gtk.Menu()
-            menuitem_edit.set_submenu(self.menu_edit)
-            self.menu.add(menuitem_edit)
-            
-            menu_add_message = gtk.ImageMenuItem(gtk.STOCK_ADD)
-            menu_add_message.connect('activate', self._tree_add_object)
-            self.menu_edit.add(menu_add_message)
-            
-            menu_delete_message = gtk.ImageMenuItem(gtk.STOCK_DELETE)
-            menu_delete_message.connect('activate', self._tree_remove_object)
-            self.menu_edit.add(menu_delete_message)
-            
-            # menu_help
-            menuitem_help = gtk.MenuItem("_Help")
-            self.menu_help = gtk.Menu()
-            menuitem_help.set_submenu(self.menu_help)
-            self.menu.add(menuitem_help)
-            
-            menu_about = gtk.ImageMenuItem(gtk.STOCK_ABOUT)
-            menu_about.connect('activate', lambda x: self.about_dialog())
-            self.menu_help.add(menu_about)
-            
+            try:
+                merge.add_ui_from_string(ui_info)
+            except gobject.GError, msg:
+                print "building menus failed: %s" % msg
+                
+            self.menu = merge.get_widget("/MenuBar")
             self.menu.show_all()
+            
+            self.menu_disconnect = merge.get_widget(
+                "/MenuBar/DatabaseMenu/Disconnect")
             
             return self.menu
         
@@ -388,6 +379,10 @@ class LdbBrowser(gtk.Window):
         def treeview():
             
             self.treeview = gtk.TreeView()
+            
+            self.treeview.connect("button-press-event",
+                                    self._dn_button_press)
+            
             self.treemodel = gtk.TreeStore(gobject.TYPE_STRING,
                                            gobject.TYPE_STRING,
                                            gobject.TYPE_BOOLEAN)
@@ -395,11 +390,11 @@ class LdbBrowser(gtk.Window):
             self.treeview.set_headers_visible(False)
             
             renderer = gtk.CellRendererText()
-            renderer.connect("edited", self._tree_rename_object)
+            renderer.connect("edited", self._dn_cell_edited)
             
             self.treeview.append_column(gtk.TreeViewColumn("_Dn",
                                         renderer, text=0, editable=2))
-            self.treeview.connect("cursor-changed", self._treeview_cursor_cb)
+            self.treeview.connect("cursor-changed", self._dn_cursor_changed)
             
             window = gtk.ScrolledWindow()
             window.set_shadow_type(gtk.SHADOW_IN)
@@ -408,13 +403,14 @@ class LdbBrowser(gtk.Window):
             
             return window
         
-        pane.pack1(treeview(), resize=True, shrink=True)
+        pane.pack1(treeview(), resize=False, shrink=True)
         
         def attributeview():
             
             self.attributeview = gtk.TreeView()
             
-            self.attributeview.connect("button-press-event", self._msg_button_press)
+            self.attributeview.connect("button-press-event",
+                                        self._msg_button_press)
             
             self.attributemodel = gtk.ListStore(str, str, gobject.TYPE_BOOLEAN)
             self.attributeview.set_model(self.attributemodel)
@@ -424,7 +420,7 @@ class LdbBrowser(gtk.Window):
             renderer.connect("edited", self._msg_cell_edited)
             renderer.set_data("column", 0)
             
-            column = gtk.TreeViewColumn("Number", renderer, text=0, editable=2)
+            column = gtk.TreeViewColumn("Attribute", renderer, text=0, editable=2)
             self.attributeview.append_column(column)
             
             # value column
@@ -456,24 +452,74 @@ class LdbBrowser(gtk.Window):
         self.add(vbox)
         
         # Show window
-        self.connect("destroy", gtk.main_quit)
-        self.set_default_size(700, 500)
-        self.set_title("GTKLDB Editor")
         self.show_all()
-
-
-    def set_ldb(self, ldb):
-        """Change the LDB object displayed.
         
-        Will refresh the window.
-        ldb -- New LDB object to use.
-        """
-        self.ldb = ldb
-        self.menu_disconnect.set_sensitive(True)
-        self.rebuild_tree()
+    def path_string(self, dn):
+        return ":".join(map(str, self.treemodel.get_path(self.treenodes[dn])))
+        
+    def _cb_find(self, button):
+        
+        def make_search_result(msg):
+            ret = [ str(x['dn']) for x in msg ]
+            # filter special dn's
+            ret = list(set(ret).intersection(self.tree.dn_set))
+            ret.sort(key=lambda x: self.path_string(x))
+            if DEBUG:
+                print "make_search_result:", ret
+            return ret
+            
+        dialog = SearchDialog(self)
+        if dialog.run() == gtk.RESPONSE_OK:
+            mode, query, flags = dialog.get_search()
+            if DEBUG:
+                print "_cb_find:", mode, query, flags
+            if mode == "ldap":
+                self.search_result = make_search_result(self.ldb.search(
+                                            expression=query, attrs=['dn']))
+                if DEBUG:
+                    print "Search result: %s" % "; ".join(self.search_result)
+                self.find_next()
+            elif mode == "text":
+                dialog2 = gtk.MessageDialog(self,
+                    gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_INFO,
+                    gtk.BUTTONS_CLOSE, "Not implemented yet!")
+                # Close dialog on user response
+                dialog2.connect ("response", lambda d, r: d.destroy())
+                dialog2.set_modal(True)
+                dialog2.show()
+        dialog.destroy()
+        
+    def find_next(self):
+        if self.search_result == None:
+            if DEBUG:
+                print "find_next: no search result"
+            return
+        
+        if len(self.search_result) == 0:
+            dialog2 = gtk.MessageDialog(self,
+                    gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_INFO,
+                    gtk.BUTTONS_CLOSE, "Not found!")
+            # Close dialog on user response
+            dialog2.connect ("response", lambda d, r: d.destroy())
+            dialog2.set_modal(True)
+            dialog2.show()
+            return
+        
+        if DEBUG:
+            print 'find_next: found "%s"' % self.search_result[0]
+        
+        path = self.path_string(self.search_result[0])
+        if DEBUG:
+            print "find_next: path", path
+        pos = path.rfind(":")
+        if pos != -1:
+            self.treeview.expand_to_path(path[:pos])
+        self.treeview.set_cursor(path)
+                
+        self.search_result = self.search_result[1:] + [self.search_result[0]]
         
     def _cb_connect(self, button):
-        dialog = LdbURLDialog()
+        dialog = LdbURLDialog(self)
         if dialog.run() == gtk.RESPONSE_OK:
             try:
                 self.set_ldb(get_ldb(dialog.get_url()))
@@ -486,6 +532,13 @@ class LdbBrowser(gtk.Window):
                 dialog2.show()
         dialog.destroy()
         
+    def _cb_disconnect(self, button):
+        self.treemodel.clear()
+        self.attributemodel.clear()
+        self.menu_disconnect.set_sensitive(False)
+        self.cur_selected_dn = None
+        self.ldb = None
+        
     def _cb_open(self, button):
         dialog = gtk.FileChooserDialog(title="Please choose a file",
             parent=self,
@@ -495,12 +548,6 @@ class LdbBrowser(gtk.Window):
             self.set_ldb(get_ldb(dialog.get_filename()))
             
         dialog.destroy()
-        
-    def _cb_disconnect(self, button):
-        self.treemodel.clear()
-        self.attributemodel.clear()
-        self.menu_disconnect.set_sensitive(False)
-        self.ldb = None
         
     def add_node(self, dn, parent_dn=None, parent_node=None, text=None):
         """Add node to treemodel.
@@ -517,27 +564,27 @@ class LdbBrowser(gtk.Window):
                 text = dn
             else:
                 text = get_rdn(dn)
-        
+                
         if DEBUG:
             print "add_node: adding node", dn
             print "add_node: parent:", parent_dn
             print "add_node: parent iter:", parent_node
             print "add_node: text:", text
-        
+            
         if dn in self.treenodes.keys():
             if DEBUG:
                 print "add_node: old entry found"
             self.remove_node(dn)
             if DEBUG:
                 print "add_node: old entry removed."
-        
+                
         cur_node = self.treemodel.append(parent_node, [text, dn, True])
         self.treenodes[dn] = cur_node
         
         if DEBUG:
             print "add_node: new iter:", cur_node
             print
-        
+            
         if dn in self.tree.childs.keys():
             for child in self.tree.childs[dn]:
                 self.add_node(child, dn, cur_node)
@@ -563,6 +610,16 @@ class LdbBrowser(gtk.Window):
         self.treemodel.remove(self.treenodes[dn])
         self.treenodes.pop(dn)
         
+    def set_ldb(self, ldb):
+        """Change the LDB object displayed.
+        
+        Will refresh the window.
+        ldb -- New LDB object to use.
+        """
+        self.ldb = ldb
+        self.menu_disconnect.set_sensitive(True)
+        self.rebuild_tree()
+        
     def get_all_dn_set(self):
         """Return set of dn strings of elements in database."""
         if self.hide_special:
@@ -572,7 +629,7 @@ class LdbBrowser(gtk.Window):
         else:
             return set(map(lambda x: str(x.dn),
                                         self.ldb.search(attrs=['dn'])))
-        
+            
     def rebuild_tree(self):
         """Rebuild LDB tree and display it in treeview."""
         
@@ -589,7 +646,7 @@ class LdbBrowser(gtk.Window):
         root_dn.sort()
         for dn in root_dn:
             self.add_node(dn, "", text=dn)
-        
+            
     def sync_tree(self):
         """Syncronize tree and treeview with database after minor change."""
         
@@ -601,17 +658,17 @@ class LdbBrowser(gtk.Window):
         
         if DEBUG:
             print 'sync_tree: dn_to_remove\n%s\n' % DnTree(dn_to_remove)
-        
+            
         for dn in DnTree(dn_to_remove).get_roots():
             if DEBUG: print 'sync_tree: removing %s' % dn
             self.remove_node(dn)
             self.tree.remove(dn)
-        
+            
         dn_to_add = new_dn_set.difference(self.tree.dn_set)
         
         if DEBUG:
             print 'sync_tree: dn_to_add\n%s\n' % DnTree(dn_to_add)
-        
+            
         for dn in dn_to_add:
             if DEBUG: print 'sync_tree: adding %s to tree' % dn
             self.tree.add(dn)
@@ -635,6 +692,9 @@ class LdbBrowser(gtk.Window):
         
         self.attributemodel.clear()
         
+        if self.cur_selected_dn == None:
+            return
+        
         msg = self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
         
         for name, el in msg.items():
@@ -642,84 +702,73 @@ class LdbBrowser(gtk.Window):
                 continue
             el = tuple(el)
             if DEBUG:
-                print name, el
+                print "refresh_attributes:", name, el
             for val in el:
                 if DEBUG:
-                    print "adding", val
+                    print 'refresh_attributes: adding value "%s"' % val
                 self.attributemodel.append([name, str(val), True])
                 
-    def _treeview_cursor_cb(self, item):
+    def _dn_cursor_changed(self, item):
         (model, iter) = item.get_selection().get_selected()
-        self.cur_selected_dn = model.get_value(iter, 1)
+        if iter == None:
+            self.cur_selected_dn = None
+        else:
+            self.cur_selected_dn = model.get_value(iter, 1)
         self.refresh_attributes()
         
-    def _tree_add_object(self, action):
-        """Add object to ldb and treeview."""
-        if self.ldb == None:
-            dialog = gtk.MessageDialog(self,
-                gtk.DIALOG_DESTROY_WITH_PARENT | gtk.DIALOG_MODAL,
-                gtk.MESSAGE_INFO, gtk.BUTTONS_CLOSE,
-                "Connect to LDB database first.")
-            # Close dialog on user response
-            dialog.connect ("response", lambda d, r: d.destroy())
-            dialog.show()
-            return
-        dialog = AddObjectDialog(parent=self)
-        if dialog.run() == gtk.RESPONSE_OK:
-            try:
-                dn = dialog.get_dn()
-                dialog.destroy()
-                if DEBUG:
-                    print '_add_tree_object: %s' % dn
-                msg = ldb.Message(ldb.Dn(self.ldb, dn))
-                self.ldb.add(msg)
-                self.sync_tree()
-            except (ldb.LdbError, ValueError), err:
-                dialog2 = gtk.MessageDialog(self,
-                    gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
-                    gtk.BUTTONS_CLOSE, str(err))
-                # Close dialog on user response
-                dialog2.connect ("response", lambda d, r: d.destroy())
-                dialog2.show()
-        else:
-            dialog.destroy()
+    def _dn_button_press(self, treeview, event):
+        
+        def add_dn(parent):
+            if parent == "":
+                dn = "cn=test"
+            else:
+                dn = "cn=test," + parent
+            msg = ldb.Message(ldb.Dn(self.ldb, dn))
+            self.ldb.add(msg)
+            self.sync_tree()
             
-    def _tree_remove_object(self, action):
-        """Show dialog that prompts for DN, and delete if it is selected."""
-        if self.ldb == None:
-            dialog = gtk.MessageDialog(self,
-                gtk.DIALOG_DESTROY_WITH_PARENT | gtk.DIALOG_MODAL,
-                gtk.MESSAGE_INFO, gtk.BUTTONS_CLOSE,
-                "Connect to LDB database first.")
-            # Close dialog on user response
-            dialog.connect ("response", lambda d, r: d.destroy())
-            dialog.show()
-            return
-        dialog = gtk.Dialog(parent=self, buttons=(gtk.STOCK_CANCEL,
-            gtk.RESPONSE_CANCEL, gtk.STOCK_DELETE, gtk.RESPONSE_OK),
-            title="Enter DN:")
-        dn_entry = gtk.Entry()
-        dialog.vbox.add(dn_entry)
-        dialog.show_all()
-        if dialog.run() == gtk.RESPONSE_OK:
-            try:
-                _dn = dn_entry.get_text()
-                dialog.destroy()
-                if DEBUG:
-                    print '_remove_tree_object: %s' % _dn
-                self.ldb.delete(ldb.Dn(self.ldb, _dn))
-                self.sync_tree()
-            except (ldb.LdbError, ValueError), err:
-                dialog2 = gtk.MessageDialog(self,
-                    gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
-                    gtk.BUTTONS_CLOSE, str(err))
-                # Close dialog on user response
-                dialog2.connect ("response", lambda d, r: d.destroy())
-                dialog2.show()
-        else:
-            dialog.destroy()
+        def delete_dn(dn):
+            self.ldb.delete(ldb.Dn(self.ldb, dn))
+            self.sync_tree()
+            self.cur_selected_dn = None
+            self.refresh_attributes()
             
-    def _tree_rename_object(self, cell, path_string, new_rdn):
+        if self.ldb == None:
+            return
+        
+        if event.button == 3:
+            x = int(event.x)
+            y = int(event.y)
+            time = event.time
+            pthinfo = treeview.get_path_at_pos(x, y)
+            if pthinfo is not None:
+                path, col, cellx, celly = pthinfo
+                path_str = ":".join(map(str, path))
+                iter = self.treemodel.get_iter_from_string(path_str)
+                
+                treeview.grab_focus()
+                treeview.set_cursor(path, col, 0)
+                
+                dn = self.treemodel[iter][1]
+                
+                popup = gtk.Menu()
+                el = gtk.ImageMenuItem(gtk.STOCK_ADD)
+                el.connect('activate', lambda x: add_dn(dn))
+                popup.add(el)
+                el = gtk.ImageMenuItem(gtk.STOCK_DELETE)
+                el.connect('activate', lambda x: delete_dn(dn))
+                popup.add(el)
+                popup.show_all()
+                popup.popup(None, None, None, event.button, time)
+            else:
+                popup = gtk.Menu()
+                el = gtk.ImageMenuItem(gtk.STOCK_ADD)
+                el.connect('activate', lambda x: add_dn(""))
+                popup.add(el)
+                popup.show_all()
+                popup.popup(None, None, None, event.button, time)
+                
+    def _dn_cell_edited(self, cell, path_string, new_rdn):
         """Rename an element."""
         
         iter = self.treemodel.get_iter_from_string(path_string)
@@ -756,7 +805,7 @@ class LdbBrowser(gtk.Window):
         
         if DEBUG:
             print "_msg_cell_edited: %s=%s" % (old_attr, old_value)
-
+            
         if column == 0: # edited name
             
             if text == old_attr:
@@ -863,6 +912,9 @@ class LdbBrowser(gtk.Window):
                 
             self.refresh_attributes()
             
+        if self.cur_selected_dn is None:
+            return
+        
         if event.button == 3:
             x = int(event.x)
             y = int(event.y)
@@ -893,18 +945,80 @@ class LdbBrowser(gtk.Window):
                 self.popup_attr2.add(el)
                 self.popup_attr2.show_all()
                 self.popup_attr2.popup(None, None, None, event.button, time)
-                print "No!", time
                 
-    def about_dialog(self):
+    def _cb_about(self, button):
         """Show about dialog."""
         dialog = gtk.AboutDialog()
         dialog.set_name(self.get_title())
+        dialog.set_comments(__doc__)
+        dialog.set_authors(__authors__)
         dialog.set_license(open(os.path.dirname(os.path.abspath(__file__)) + \
                                 '/LICENSE').read())
         dialog.set_website("http://www.samba.org/")
         ## Close dialog on user response
         dialog.connect ("response", lambda d, r: d.destroy())
         dialog.show()
+
+
+class SearchDialog(gtk.Dialog):
+    """Dialog to get what to search."""
+    def __init__(self, parent=None):
+        
+        self.ldap_flags = None
+        self.text_flags = None
+        
+        super(SearchDialog, self).__init__(parent=parent,
+                buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
+                         gtk.STOCK_FIND, gtk.RESPONSE_OK))
+        try:
+            self.set_screen(parent.get_screen())
+        except AttributeError:
+            self.connect('destroy', lambda *w: gtk.main_quit())
+            
+        self.set_title("Find")
+        self.set_resizable(False)
+        
+        vbox = gtk.VBox()
+        self.vbox.pack_start(vbox, True, True, 0)
+        
+        self.expander1 = gtk.Expander("LDAP Query")
+        vbox.pack_start(self.expander1, False, True, 0)
+        
+        hbox = gtk.HBox()
+        hbox.set_border_width(5)
+        label = gtk.Label("Query:")
+        hbox.pack_start(label, False)
+        self.ldap_query = gtk.Entry()
+        hbox.add(self.ldap_query)
+        self.expander1.add(hbox)
+        self.expander1.set_expanded(True)
+        self.expander1.connect('activate', self._activate1)
+        
+        self.expander2 = gtk.Expander("Simple search")
+        vbox.pack_start(self.expander2, False, True, 0)
+        
+        hbox = gtk.HBox()
+        hbox.set_border_width(5)
+        label = gtk.Label("Find:")
+        hbox.pack_start(label, False)
+        self.text_to_find = gtk.Entry()
+        hbox.add(self.text_to_find)
+        self.expander2.add(hbox)
+        self.expander2.set_expanded(False)
+        self.expander2.connect('activate', self._activate2)
+        
+        self.show_all()
+        
+    def _activate1(self, expander):
+        self.expander2.set_expanded(not self.expander2.get_expanded())
+        
+    def _activate2(self, expander):
+        self.expander1.set_expanded(not self.expander1.get_expanded())
+        
+    def get_search(self):
+        if self.expander1.get_expanded():
+            return ("ldap", self.ldap_query.get_text(), self.ldap_flags)
+        return ("text", self.text_to_find.get_text(), self.text_flags)
 
 
 def main():
@@ -915,4 +1029,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
