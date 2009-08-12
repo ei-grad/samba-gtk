@@ -32,15 +32,9 @@ import ldb
 
 __authors__ = ['2007 Jelmer Vernooij <jelmer@samba.org>',
                '2009 Andrew Grigorev <andrew@ei-grad.ru>']
-__thanks_to__ = ['Andrew Bartlet']
+__thanks_to__ = ['Andrew Bartlett <abartlet@samba.org>']
 __title__ = "GTKLDB"
-DEBUG = True
-
-# FIXME: seg.fault in self.ldb.search with incorrect expression
-# for example use "|(CN=RID-Manager)(CN=USN-Changed)"
-# not appears in interactive mode, use search through gtkldb
-# may be that is fixed in updated ldb, but I still using one
-# which is out of date
+DEBUG = False
 
 class LdbURLDialog(gtk.Dialog):
     """Dialog that prompts for a LDB URL.
@@ -1153,7 +1147,7 @@ class SearchDialog(gtk.Dialog):
         self.vbox.pack_start(vbox, True, True, 0)
         
         self.expander1 = gtk.Expander("LDAP Query")
-        vbox.pack_start(self.expander1, False, True, 0)
+#        vbox.pack_start(self.expander1, False, True, 0)
         
         hbox = gtk.HBox()
         hbox.set_border_width(5)
@@ -1161,12 +1155,14 @@ class SearchDialog(gtk.Dialog):
         hbox.pack_start(label, False)
         self.ldap_query = gtk.Entry()
         hbox.add(self.ldap_query)
-        self.expander1.add(hbox)
+#        self.expander1.add(hbox)
         self.expander1.set_expanded(True)
         self.expander1.connect('activate', self._activate1)
         
+        self.vbox.add(hbox)
+        
         self.expander2 = gtk.Expander("Simple search")
-        vbox.pack_start(self.expander2, False, True, 0)
+#        vbox.pack_start(self.expander2, False, True, 0)
         
         vbox2 = gtk.VBox()
         vbox2.set_border_width(5)
