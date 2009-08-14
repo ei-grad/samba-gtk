@@ -171,8 +171,6 @@ class DnTree:
         dn --- distinguished name of node.
         """
         
-        # yeah, that is russian pythonic spagetty code...
-        
         if dn in self.dn_set:
             raise ValueError('A record with dn=%s already exists!' % dn)
             
@@ -481,7 +479,7 @@ class LdbBrowser(gtk.Window):
             
         code, msg = err
         
-        if code == 34: # No messages found, annoing!
+        if code == 34: # "No messages found" error, it's annoing!
             return
         
         dialog = gtk.MessageDialog(self,
@@ -528,7 +526,9 @@ class LdbBrowser(gtk.Window):
         
         if DEBUG:
             print "set_search:", mode, query, flags
-            
+        
+        self.sync_tree()
+        
         if mode == "ldap":
             try:
                 if DEBUG:
@@ -839,20 +839,31 @@ class LdbBrowser(gtk.Window):
         
         def add_dn(parent):
             if parent == "":
-                dn = "cn=test"
+                dn = ""
             else:
-                dn = "cn=test," + parent
-            try:
-                msg = ldb.Message(ldb.Dn(self.ldb, dn))
-                self.ldb.add(msg)
-            except (ldb.LdbError, ValueError), err:
-                dialog = gtk.MessageDialog(self,
-                    gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
-                    gtk.BUTTONS_CLOSE, str(err))
-                # Close dialog on user response
-                dialog.connect ("response", lambda d, r: d.destroy())
-                dialog.show()
-            self.sync_tree()
+                dn = "CN=," + parent
+            dn_dialog = gtk.Dialog(parent=self,
+                buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
+                         gtk.STOCK_ADD, gtk.RESPONSE_OK))
+            dn_entry = gtk.Entry()
+            dn_entry.set_text(dn)
+            dn_dialog.vbox.add(dn_entry)
+            dn_dialog.set_title("Enter DN:")
+            dn_dialog.show_all()
+            if dn_dialog.run() == gtk.RESPONSE_OK:
+                dn = dn_entry.get_text()
+                try:
+                    msg = ldb.Message(ldb.Dn(self.ldb, dn))
+                    self.ldb.add(msg)
+                except (ldb.LdbError, ValueError), err:
+                    dialog = gtk.MessageDialog(self,
+                        gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR,
+                        gtk.BUTTONS_CLOSE, str(err))
+                    # Close dialog on user response
+                    dialog.connect ("response", lambda d, r: d.destroy())
+                    dialog.show()
+                self.sync_tree()
+            dn_dialog.destroy()
             
         def delete_dn(dn):
             try:
@@ -1032,30 +1043,48 @@ class LdbBrowser(gtk.Window):
     def _msg_button_press(self, treeview, event):
         """Show right-click popup menu to add or delete element."""
         
-        def add_item():
-            m = ldb.Message()
-            m.dn = ldb.Dn(self.ldb, self.cur_selected_dn)
+        def add_attr():
             
-            m['new_attr'] = ldb.MessageElement('value',
-                    ldb.CHANGETYPE_ADD, 'new_attr')
-            if DEBUG:
-                print 'message:', m
-                print 'before add:'
-                print self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
+            dialog = gtk.Dialog(parent=self,
+                buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
+                         gtk.STOCK_ADD, gtk.RESPONSE_OK))
+            attr_entry = gtk.Entry()
+            attr_entry.set_text("Name")
+            value_entry = gtk.Entry()
+            value_entry.set_text("Value")
+            dialog.vbox.add(attr_entry)
+            dialog.vbox.add(value_entry)
+            dialog.show_all()
+            if dialog.run() == gtk.RESPONSE_OK:
                 
-            try:
-                self.ldb.modify(m)
-            except ldb.LdbError, err:
-                self.ldb_error_exception(err)
-                return
-            
-            if DEBUG:
-                print 'after add:'
-                print self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
+                attr = attr_entry.get_text()
+                value = value_entry.get_text()
                 
-            self.refresh_attributes()
+                m = ldb.Message()
+                m.dn = ldb.Dn(self.ldb, self.cur_selected_dn)
+                m[attr] = ldb.MessageElement(value,
+                        ldb.CHANGETYPE_ADD, attr)
+                
+                if DEBUG:
+                    print 'message:', m
+                    print 'before add:'
+                    print self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
+                    
+                try:
+                    self.ldb.modify(m)
+                except ldb.LdbError, err:
+                    self.ldb_error_exception(err)
+                    return
+                
+                if DEBUG:
+                    print 'after add:'
+                    print self.ldb.search(self.cur_selected_dn, ldb.SCOPE_BASE)[0]
+                    
+                self.refresh_attributes()
+                
+            dialog.destroy()
             
-        def delete_item(dn, attr, value):
+        def delete_attr(dn, attr, value):
             
             m = ldb.Message()
             m.dn = ldb.Dn(self.ldb, dn)
@@ -1098,17 +1127,17 @@ class LdbBrowser(gtk.Window):
                 
                 popup = gtk.Menu()
                 el = gtk.MenuItem("_Delete")
-                el.connect('activate', lambda x: delete_item(dn, attr, value))
+                el.connect('activate', lambda x: delete_attr(dn, attr, value))
                 popup.add(el)
                 popup.show_all()
                 popup.popup(None, None, None, event.button, time)
             else:
-                self.popup_attr2 = gtk.Menu()
+                popup = gtk.Menu()
                 el = gtk.MenuItem("_Add")
-                el.connect('activate', lambda x: add_item())
-                self.popup_attr2.add(el)
-                self.popup_attr2.show_all()
-                self.popup_attr2.popup(None, None, None, event.button, time)
+                el.connect('activate', lambda x: add_attr())
+                popup.add(el)
+                popup.show_all()
+                popup.popup(None, None, None, event.button, time)
                 
     def _cb_about(self, button):
         """Show about dialog."""
